@@ -1,6 +1,6 @@
 # Procesadores-Lenguaje-II
 
-El analizador semántico y la comprobación de tipos.
+## El analizador semántico y la comprobación de tipos.
 
 
 Durante la etapa de análisis semántico se define el significado de cada construcción del lenguaje de forma que el compilador pueda interpretar de forma única y precisa todas y cada una de las sentencias del lenguaje fuente. Para ello se usa como base, la representación intermedia en forma de árbol generada durante el análisis sintáctico.
@@ -44,10 +44,13 @@ Para ello se han realizado las siguientes acciones:
 • Gestion de errores léxicos, sintácticos, semánticos ( LexicalErrorManager, SyntaxErrorManager, SemanticErrorManager).
 
 
-Generación de código intermedio
+## Generación de código intermedio
 
 El código intermedio es una secuencia de instrucciones cercanas al código destino, pero independientes de cualquier arquitectura física.
 Para la generación del código intermedio se ha usado la representación lineal, realizada por Javier Vélez Reyes, donde cada elemento se compone de: código de operación, hasta dos operandos de entrada y uno de salida.
 
+## Generación de código final
+
+En esta fase se traduce el código intermedio al código final adecuado para la arquitectura hardware destino, en este caso el simulador ENS2001. El código objeto resultante del proceso de compilación es un subconjunto del estándar Ensamblador IEEE 694.
 
 
