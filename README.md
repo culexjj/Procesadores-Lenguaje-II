@@ -1,7 +1,7 @@
 # Procesadores-Lenguaje-II
-Código de la practica de PL II del curso 2022-2023
 
 El analizador semántico y la comprobación de tipos.
+
 
 Durante la etapa de análisis semántico se define el significado de cada construcción del lenguaje de forma que el compilador pueda interpretar de forma única y precisa todas y cada una de las sentencias del lenguaje fuente. Para ello se usa como base, la representación intermedia en forma de árbol generada durante el análisis sintáctico.
 
@@ -19,7 +19,9 @@ Son responsabilidad del analizador semántico las siguientes tareas:
 
 • Control corrección semántica,
 
+
 Para ello se han realizado las siguientes acciones:
+
 
 • Factorizar la gramática: Como paso previo se ha factorizado la gramática para evitar conflictos durante el análisis sintáctico.
 
@@ -42,5 +44,4 @@ Para ello se han realizado las siguientes acciones:
 • Gestion de errores léxicos, sintácticos, semánticos ( LexicalErrorManager, SyntaxErrorManager, SemanticErrorManager).
 
 
-El fichero scanner.flex tiene algunos cambios menoresque realicé sobre el propuesto por el ED.
 
