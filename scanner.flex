@@ -1,5 +1,3 @@
-//VERSION 1.0.0
-//Jose Javier Culebras
 
 package compiler.lexical;
 
