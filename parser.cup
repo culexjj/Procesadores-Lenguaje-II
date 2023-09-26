@@ -1,0 +1,2340 @@
+//VERSION 5.0.5
+//Jose Javier Culebras
+
+
+
+package compiler.syntax;
+
+// Declaracion de importaciones 
+//(No modificar las proporcionadas. Se pueden agregar mas)
+
+import java_cup.runtime.Symbol;
+import java.util.*;
+
+import es.uned.lsi.compiler.lexical.*;
+import es.uned.lsi.compiler.code.*;
+import es.uned.lsi.compiler.intermediate.*;
+import es.uned.lsi.compiler.semantic.*;
+import es.uned.lsi.compiler.semantic.symbol.*;
+import es.uned.lsi.compiler.semantic.type.*;
+import es.uned.lsi.compiler.syntax.*;
+
+import compiler.CompilerContext;
+import compiler.lexical.*;
+import compiler.syntax.nonTerminal.*;
+
+import compiler.semantic.symbol.*;
+import compiler.semantic.type.*;
+import compiler.intermediate.*;
+import compiler.code.*;
+
+
+import java.sql.Timestamp;
+import java.text.SimpleDateFormat;
+import java.util.Date;
+
+
+// Declaracion del codigo de usuario
+
+action code {:
+	
+	SyntaxErrorManager   syntaxErrorManager   = CompilerContext.getSyntaxErrorManager();
+	SemanticErrorManager semanticErrorManager = CompilerContext.getSemanticErrorManager ();
+	ScopeManagerIF       scopeManager         = CompilerContext.getScopeManager ();
+	FinalCodeFactoryIF   finalCodeFactory     = CompilerContext.getFinalCodeFactory ();
+	
+	ExecutionEnvironmentIF	codigoFinal 	  = CompilerContext.getExecutionEnvironment(); //Obj 
+	List<QuadrupleIF> 	 listaCadenas         = new ArrayList<QuadrupleIF>(); //Lista Cadenas sentencia salida
+	
+
+:}	
+
+parser code {:
+	SyntaxErrorManager syntaxErrorManager = CompilerContext.getSyntaxErrorManager();
+	
+	public void syntax_error(Symbol symbol)
+	{ 
+	    Token token = (Token) symbol.value;
+	    syntaxErrorManager.syntaxError ("Error sintactico", token);	    
+	}
+		
+	public void unrecovered_syntax_error(java_cup.runtime.Symbol symbol)
+	{	
+	    Token token = (Token) symbol.value;
+	    syntaxErrorManager.syntaxFatalError ("Error fatal", token);
+	}
+:}
+
+// Declaracion de terminales
+
+
+terminal Token PLUS;
+terminal Token AUTO_INCREMENTO;
+terminal Token MULT;
+terminal Token AND_LOGICA;
+terminal Token OPEN_BRACKET;
+terminal Token CLOSE_BRACKET;
+terminal Token OPEN_PARENTHESIS;
+terminal Token CLOSE_PARENTHESIS;
+terminal Token OPEN_KEY;
+terminal Token CLOSE_KEY;
+terminal Token SEMI_COLON;
+terminal Token COLON;
+terminal Token TWO_POINTS;
+terminal Token NEGACION;
+terminal Token EQUAL;
+terminal Token ASSIGN_SUMA;
+terminal Token ASSIGN;
+terminal Token LOWER_THAN;
+terminal Token CASO;
+terminal Token CONSTANTE;
+terminal Token CORTE;
+terminal Token ENTERO;
+terminal Token ESCRIBE;
+terminal Token ESCRIBE_ENT;
+terminal Token ALTENATIVAS;
+terminal Token MIENTRAS;
+terminal Token PORDEFECTO;
+terminal Token PRINCIPAL;
+terminal Token DEVUELVE;
+terminal Token SI;
+terminal Token SINO;
+terminal Token TIPO;
+terminal Token VACIO;
+terminal Token IDENTIFICADOR;
+terminal Token NUMERO;
+terminal Token STRING;
+
+
+// Declaracion de no terminales
+
+non terminal  						program;
+non terminal Axiom					axiom;
+non terminal						axiomFactorizado;
+non terminal  						funcionPrincipal;
+non terminal						epsilon;
+non terminal						seccionFunciones;
+non terminal Funcion				funcion;
+non terminal 						funcionFactorizado;
+non terminal						seccionParametros;
+non terminal DeclaracionParametros 	declaracionParametros; 
+non terminal Parametro				parametro;
+non terminal						seccionConstantes;
+non terminal						declaracionConstante;
+non terminal						seccionTipos;
+non terminal						declaracionTipo;
+non terminal 						tamTipo;
+non terminal						seccionVariables;
+non terminal 						declaracionVariable;
+non terminal 						declaracionVariables;
+non terminal						declaracionVariableEntera;
+non terminal ListadoIDs				listadoIDs;
+non terminal Id						id;
+non terminal Expresion				expresion;
+non terminal 						accesoVector;
+non terminal LlamadaFuncion			llamadaFuncion;
+non terminal						bloque;
+non terminal						bloqueFactorizado;
+non terminal ListadoSentencias		listadoSentencias;
+non terminal Sentencia				sentencia;
+non terminal SentenciaIncremento	sentenciaIncremento;
+non terminal SentenciaAsignacion 	sentenciaAsignacion;
+non terminal Ref					ref;
+non terminal SentenciaAsignacion	sentenciaAsignacionSuma;
+non terminal SentenciaSi			sentenciaSi;
+non terminal						sentenciaSiFactorizada;
+non terminal SentenciaAlternativas	sentenciaAlternativas;
+non terminal						casosAlternativa;
+non terminal CasoAlt				casoAlt; 
+non terminal PorDefecto				porDefecto;
+non terminal SentenciaMientras		sentenciaMientras;
+non terminal						sentenciaLlamadaFuncion;
+non terminal Parametros				parametros; 
+non terminal SentenciaSalida		sentenciaSalida;
+non terminal						opcionesEscribe;
+non terminal						opcionesEscribeEnt;
+non terminal						sentenciaDevuelve;
+
+// Declaracion de relaciones de precedencia
+precedence left     AND_LOGICA;
+precedence left		EQUAL;
+precedence left		LOWER_THAN;
+precedence left		PLUS;
+precedence left		MULT;
+precedence left		AUTO_INCREMENTO, NEGACION;
+precedence right	OPEN_BRACKET, CLOSE_BRACKET;
+precedence left 	OPEN_KEY, CLOSE_KEY;
+
+precedence nonassoc SINO;
+precedence nonassoc SI;
+            
+
+// Declaracion de reglas de produccion
+start with program;
+
+program ::= 
+
+		{: 
+		
+		syntaxErrorManager.syntaxInfo ("Starting parsing..."); 
+		semanticErrorManager.semanticInfo ("Starting semantic...");
+			
+		:} 	axiom:ax
+	
+		{:   		
+			
+		//Asignación de posiciones de memoria para las variables globales
+		//NOTA: Se saca 'direccionEstatica' fuera del bucle para que no repita direcciones por cada ambito (de otra forma en cada iteracion empieza con la direcciones de memoria en 65535)
+		List<ScopeIF> scopes = scopeManager.getAllScopes();
+		int direccionEstatica = codigoFinal.getMemorySize(); // MAX_ADDRESS = 65535
+
+		for (ScopeIF scope: scopes) {
+			List<SymbolIF> simbolos = scope.getSymbolTable().getSymbols();
+			for (SymbolIF simbolo: simbolos) {
+				if (simbolo instanceof SymbolVariable) { //Comprobar si el símbolo es una variable
+				((SymbolVariable)simbolo).setAddress(direccionEstatica);//Guardamos la dirección del variable en SymbolVariable
+				direccionEstatica = direccionEstatica - simbolo.getType().getSize(); //Actualizamos el valor de direccionEstatica para el próximo símbolo		
+				}
+			}
+
+
+		//Asignar posiciones de memoria para los temporales
+		List<TemporalIF> temporales = scope.getTemporalTable ().getTemporals();
+			for (TemporalIF temporal: temporales) {
+				if (temporal instanceof Temporal) {
+				((Temporal)temporal).setAddress(direccionEstatica); //Guardamos la dirección del temporal en Temporal.java
+				direccionEstatica = direccionEstatica - ((Temporal)temporal).getSize();
+				}
+			}
+		}
+			
+		
+/////////////////////////////////// Recuperar aqui todo el codigo intermedio ////////////////////////
+			
+		ScopeIF ambito = scopeManager.getCurrentScope(); //Ambito
+		IntermediateCodeBuilder codeBuilder = new IntermediateCodeBuilder(ambito); //Code Builder
+		
+		ListadoSentencias lisSenFinal = new ListadoSentencias(); //Objeto ListadoSentencias Final							
+		lisSenFinal = (((AxiomImp)ax).getListadoSentencias());	
+		
+		ArrayList<Sentencia> listadoSen = new ArrayList<Sentencia>();//Obj Array de Sentencia	
+		listadoSen = lisSenFinal.getListaSentencias();
+		
+		while (listadoSen.remove(null)) {} //Eliminar elementos null en la lista de sentencias				
+		Collections.reverse(listadoSen); //Ordenar lista de quadruplas
+
+
+		//Inicializar a cero las variables/vectores del ambito global (scope.getLevel () == 0) 
+		for (ScopeIF scope: scopes) {
+			if (scope.getLevel () == 0) { //ambito global
+				List<SymbolIF> simbolos = scope.getSymbolTable ().getSymbols();
+				for (SymbolIF simbolo: simbolos) {
+					if (simbolo instanceof SymbolVariable) { //Variable
+						if(simbolo.getType().getName().equals("ENTERO")){
+							Variable var = new Variable(simbolo.getName(), simbolo.getScope());
+							if (((((SymbolVariable)simbolo).getValue()) == null)) {// Se inicializa las variables del programa principal a 0 si no se han definido en la declaracion
+								codeBuilder.addQuadruple("VARGLOBAL", var, 0);
+							} else {
+								int valor = ((SymbolVariable)simbolo).getValue();
+								codeBuilder.addQuadruple("VARGLOBAL", var, valor); //Variable con valor asignado en su declaracion
+							}			
+						} else { //Vector
+							for (int i=0; i < simbolo.getType().getSize(); i++) {
+								int direccion = ((SymbolVariable)simbolo).getAddress() - i;
+								Variable var = new Variable(simbolo.getName(), simbolo.getScope());
+								codeBuilder.addQuadruple("VARGLOBALVECTOR", var, direccion, 0);
+							}
+						}
+					}
+				}
+			}
+		}
+
+
+		//Añadir las quadruplas de todas las sentencias y la lista de cadenas
+		for (int x = 0; x < listadoSen.size() ; x++) {
+			codeBuilder.addQuadruples(listadoSen.get(x).getIntermediateCode()); 		
+		}
+		
+		codeBuilder.addQuadruple("HALT"); //Quadrupla final
+		codeBuilder.addQuadruples(listaCadenas); //Añadimos la lista de cadenas	
+		
+		Axiom axiomFinal =  new AxiomImp();	//Objeto							
+		axiomFinal.setIntermediateCode(codeBuilder.create());		
+		
+		List intermediateCode = axiomFinal.getIntermediateCode ();	//Listado de quadruplas final						
+		finalCodeFactory.setEnvironment(CompilerContext.getExecutionEnvironment());
+		finalCodeFactory.create (intermediateCode);
+	
+		// En caso de no comentarse las dos sentencias anteriores se puede generar una excepcion
+		// en las llamadas a cupTest si el compilador no está completo. Esto es debido a que 
+		// aún no se tendrá implementada la generación de código intermedio ni final.
+		// Para la entrega final deberán descomentarse y usarse.		
+				
+		scopeManager.closeScope(); //Cerrar ambito global
+					
+		syntaxErrorManager.syntaxInfo ("Parsing process ended.");
+		semanticErrorManager.semanticInfo ("Semantic process ended.");
+			
+		:}
+
+| error {: syntaxErrorManager.syntaxError ("ERROR SINTACTICO DETECTADO: Verifique la gramatica y/o la linea anterior."); :}; //Control Error Sintactico 
+
+
+axiom ::=
+
+		{:
+
+		//ACCIONES
+		//Abrir ambito global
+		//Añadir tipos primitivos ENTERO & VACIO
+		
+		String nombre = "Global";
+		scopeManager.openScope(nombre); 
+		ScopeIF ambito = scopeManager.getCurrentScope();
+			
+		TypeTableIF tablaTipos = ambito.getTypeTable();	
+		TypeSimple tipoPrimitivoEntero = new TypeSimple(ambito,"ENTERO");
+		TypeSimple tipoPrimitivoVacio = new TypeSimple(ambito,"VACIO");	
+		tablaTipos.addType("ENTERO",tipoPrimitivoEntero);
+		tablaTipos.addType("VACIO",tipoPrimitivoVacio);
+					
+		:} seccionConstantes seccionTipos axiomFactorizado:lisSen
+
+		{: 
+						
+		Axiom axiom =  new AxiomImp((ListadoSentencias)lisSen);
+			
+		RESULT = axiom;
+
+		:};
+
+							  
+axiomFactorizado ::=  seccionVariables seccionFunciones:lisSen
+
+		{:
+						
+		RESULT = (ListadoSentencias)lisSen;
+		
+		:} 
+
+| seccionFunciones:lisSen
+
+		{:
+			
+		RESULT = (ListadoSentencias)lisSen;
+
+		:};
+
+
+//  CONSTANTES
+seccionConstantes ::= declaracionConstante seccionConstantes | epsilon;
+declaracionConstante ::= CONSTANTE IDENTIFICADOR:ide NUMERO:num SEMI_COLON
+
+		{:
+
+		//ACCIONES
+		//Comprobar si constante ya declarada
+		//Comprobar valor constante (realizado por el analizador sintactico)
+		//Añadir identificador de la constante en tabla simbolos ambito (ambito, nombre constante, tipo, valor)
+		
+		String nombre = ide.getLexema(); //Nombre de la constante
+		int valor = Integer.valueOf(num.getLexema()); //Valor de la constante
+				
+		//Recuperar ambito actual y tabla de simbolos
+		ScopeIF ambito = scopeManager.getCurrentScope();
+		SymbolTableIF tablaSimbolos = ambito.getSymbolTable();
+		
+		//Comprobar existencia de la constante en el ambito global. Si no existe se añade en la tabla de simbolos. Una constante solo puede declararse en el ambito global
+		if (tablaSimbolos.containsSymbol(nombre)) {
+			semanticErrorManager.semanticFatalError("Error linea: " + ide.getLine() + " , el identificador " + nombre + " ya existe.");
+		} else 	{		
+			TypeIF tipoIf = scopeManager.searchType("ENTERO");
+			SymbolConstant constante = new SymbolConstant(ambito, nombre, tipoIf, valor);
+			tablaSimbolos.addSymbol(constante);
+		}
+							
+		:};
+
+		
+epsilon ::= ;
+
+
+//  TIPOS
+seccionTipos ::= declaracionTipo seccionTipos | epsilon;
+declaracionTipo ::= TIPO ENTERO IDENTIFICADOR:ide OPEN_BRACKET tamTipo:tam CLOSE_BRACKET SEMI_COLON	
+
+		{:
+
+		//ACCIONES
+		//Comprobar si tipo ya declarado en todos los ambitos alcanzables
+		//Comprobar tamaño vector > 0
+		//Añadir identificador del tipo en tabla tipos ambito (ambito, tipo, nombre tipo, valor)
+			
+		String nombre = ide.getLexema(); //Nombre del tipo
+		int valor = (int)tam; //Tamaño del vector
+		
+		//Recuperar ambito actual y tabla de tipos
+		ScopeIF ambito = scopeManager.getCurrentScope();
+		TypeTableIF tablaTipos = ambito.getTypeTable();
+
+		//Comprobar si el tipo ha sido previamente declarado en todos los ambitos alcanzables desde el ambito actual
+		//No es posible definir dos tipos con el mismo nombre aunque pertenezcan a distintos ámbitos, si desde un ámbito se puede alcanzar el otro ámbito
+		//Por eso buscamos en todos los ambitos alcanzables
+		if (scopeManager.containsType(nombre)) {
+			semanticErrorManager.semanticFatalError("Error linea: " + ide.getLine() + " , el tipo " + nombre + " ya existe.");
+		}
+		
+		//Comprobar tamaño vector	
+		if (valor < 1) {
+			semanticErrorManager.semanticFatalError("Error linea: " + ide.getLine() + " , el numero de elementos no puede ser menor de 1");
+		}
+		
+		//Añadir tipo en la tabla de tipos
+		TypeIF tipoIf = scopeManager.searchType("ENTERO");
+		TypeArray vector = new TypeArray(ambito, nombre, tipoIf, valor);
+		tablaTipos.addType(vector);
+		
+		:};
+
+
+tamTipo ::= NUMERO:num
+
+		{:
+		
+		int valor = Integer.valueOf(num.getLexema()); //Tamaño del vector
+		RESULT = valor; //Retornar tamaño del vector 
+		
+		:} 
+		
+| IDENTIFICADOR:ide
+		
+		{:
+				
+		String nombre = ide.getLexema(); //Nombre de la constante 
+		int valor; //Tamaño del vector
+		
+		//Recuperar ambito actual y tabla de simbolos
+		ScopeIF ambito = scopeManager.getCurrentScope();
+		SymbolIF identificador = scopeManager.searchSymbol(nombre);
+		
+		//Comprobar si el identificador  ha sido previamente declarado en todos los ambitos alcanzables desde el ambito actual
+		//Si existe recuperamos su valor. Si no existe error. No se comprueba que es tipo constante ya que en este punto de la gramatica solo pueden existir constantes en la tabla de simbolos
+		if (scopeManager.containsSymbol(nombre)) {
+			SymbolConstant constante = (SymbolConstant)identificador;
+			valor = (int)constante.getValue();
+			RESULT = valor; //Retornar tamaño del vector
+		} else {	
+			semanticErrorManager.semanticFatalError("Error linea: " + ide.getLine() + " , el identificador " + nombre + " no es una constante");
+		}
+			
+		:};
+
+
+//  VARIABLES
+seccionVariables ::= seccionVariables declaracionVariable | declaracionVariable;	
+declaracionVariable ::= ENTERO listadoIDs:lis SEMI_COLON
+
+		{:	
+		
+		//ACCIONES
+		//Comprobar si variable ha sido declarado en el ambito actual
+		//Añadir identificador de la variable en tabla simbolos ambito (ambito, nombre, tipo, valor)
+		
+		ArrayList<Id> lista = new ArrayList<Id>(); //Lista objetos Id
+		lista = lis.getLista(); //Lista de variables
+		String nombre; //Nombre de variable
+		Integer valor; //Valor de variable	
+		
+		//Recuperar ambito actual y tabla de simbolos
+		ScopeIF ambito = scopeManager.getCurrentScope();
+		SymbolTableIF tablaSimbolos = ambito.getSymbolTable();
+		
+		//Iterar sobre la lista de variables	
+		for (int x = 0; x < lista.size(); x++) {
+			nombre = lista.get(x).getNombre(); //Nombre
+			valor = lista.get(x).getValor(); //Valor
+		
+			//Comprobar si variable ha sido declarada en el ambito actual. Si no existe se añade. Si existe, error
+			if(tablaSimbolos.containsSymbol(nombre))  {
+				semanticErrorManager.semanticFatalError("Error :  la variable " + nombre + " ya existe.");
+			} else {
+				TypeIF tipoIf = scopeManager.searchType("ENTERO");	
+				SymbolVariable variable = new SymbolVariable(ambito, nombre, tipoIf, valor);
+				tablaSimbolos.addSymbol(variable);
+			}
+		}
+		
+		:}
+
+| IDENTIFICADOR:ide listadoIDs:lis SEMI_COLON
+	 
+		{:
+		 
+		//ACCIONES
+		//Comprobar si el identificador ha sido declarado en el ambito actual
+		//Comprobar si el tipo ha sido declarado en todos los tipos
+		//Añadir identificador de la variable en tabla simbolos ambito (ambito, nombre, tipo)
+		
+		ArrayList<Id> lista = new ArrayList<Id>(); //Lista objetos Id
+		lista = lis.getLista(); //Lista de variables
+		String nombre; //Nombre de variable
+		String tipo; //Tipo de variable
+		Boolean existe; //Tipo existe	
+		
+		//Recuperar ambito actual y tabla de simbolos
+		ScopeIF ambito = scopeManager.getCurrentScope();
+		SymbolTableIF tablaSimbolos = ambito.getSymbolTable();
+		
+		//Iterar sobre la lista de variables	
+		for (int x = 0; x < lista.size(); x++) {		
+			nombre = lista.get(x).getNombre(); //Nombre
+		
+			//Comprobar si variable ha sido declarada en el ambito actual Si no existe se añade. Si existe, error
+			if(tablaSimbolos.containsSymbol(nombre)) {
+				semanticErrorManager.semanticFatalError("Error :  la variable " + nombre + " ya existe.");
+			} else {
+				//Comprobar si tipo de la variable ha sido declarado en todos los ambitos alcanzables Si no existe, error. Si existe se añade
+				tipo = ide.getLexema(); //Nombre del tipo
+				existe = scopeManager.containsType(tipo); //existe
+				
+				if (!existe) {
+					semanticErrorManager.semanticFatalError("Error :  el tipo " + nombre + " no existe.");
+				} else {
+					TypeIF tipoIf = scopeManager.searchType(tipo);	
+					SymbolVariable variable = new SymbolVariable(ambito, nombre, tipoIf);
+					tablaSimbolos.addSymbol(variable);
+				}
+			}
+		}
+		
+		:};
+	
+	
+listadoIDs ::=  id:ide  COLON listadoIDs:lis
+
+		{:
+		
+		ListadoIDs lista = new ListadoIDs(); //Lista de variables
+		lista.setLista(lis.getLista()); //Copiar lista anterior
+		Id identificador = new Id(ide.getNombre(),ide.getValor()); //Objeto Id
+		lista.addId(identificador); //Añadir a la lista de variables 
+		
+		RESULT = lista; //Retornar lista de variables
+		
+		:} 
+
+| id:ide
+	
+		{:
+		
+		ListadoIDs lista = new ListadoIDs(); //Lista de variables
+		Id identificador = new Id(ide.getNombre(),ide.getValor()); //Objeto Id
+		lista.addId(identificador); //Añadir a la lista de variables 
+		
+		RESULT = lista; //Retornar lista de variables
+
+		:}; 
+	
+	
+id ::= IDENTIFICADOR:ide
+
+		{:
+		
+		String nombre = ide.getLexema(); //Nombre de la variable
+		Id identificador = new Id(nombre); //Objeto Id
+
+		RESULT = identificador; //Retornar identificador
+		
+		:}
+
+| IDENTIFICADOR:ide ASSIGN NUMERO:num
+	 
+		{:
+		 
+		String nombre = ide.getLexema(); //Nombre de la variable
+		Integer valor = Integer.valueOf(num.getLexema()); //Valor de la variable
+		Id identificador = new Id(nombre,valor); //Objeto Identificador y valor
+		 
+		RESULT = identificador; //Retornar identificador
+		 
+		:};	
+
+
+// FUNCIONES
+
+seccionFunciones ::= funcion seccionFunciones:lisSen     
+
+	{:
+	
+		RESULT = (ListadoSentencias)lisSen;
+	
+	:}
+	
+| funcionPrincipal:lisSen 
+
+	{:
+	
+		RESULT = (ListadoSentencias)lisSen;
+	
+	:};
+
+
+funcion ::= ENTERO IDENTIFICADOR:ide OPEN_KEY
+ 
+		{:
+		
+		//ACCIONES
+		//Comprobar si el tipo ha sido declarado en el ambito actual
+		//Comprobar si el simbolo ha sido declarado en el ambito actual
+		//Añadir funcion en la tabla de tipos
+		//Añadir identificador de la funcion en tabla simbolos ambito (ambito, nombre, tipo, retorno)
+		//Añadir nuevo ambito para la funcion
+
+		String nombre = ide.getLexema();  //Nombre de la funcion
+		
+		//Recuperar ambito actual, tabla de simbolos y tabla de tipos
+		ScopeIF ambito = scopeManager.getCurrentScope();
+		SymbolTableIF tablaSimbolos = ambito.getSymbolTable();
+		TypeTableIF tablaTipos = ambito.getTypeTable();
+		
+		//Comprobar si el simbolo/tipo existe
+		if (tablaSimbolos.containsSymbol(nombre)) {
+			semanticErrorManager.semanticFatalError("Error :  el simbolo " + nombre + " ya existe.");
+		}
+		
+		if (tablaTipos.containsType(nombre)) {
+			semanticErrorManager.semanticFatalError("Error :  el tipo " + nombre + " ya existe.");
+		}
+		
+		//Añadir funcion en la tabla de tipos
+		TypeFunction tipoFuncion = new TypeFunction(ambito,nombre);	
+		tablaTipos.addType(nombre,tipoFuncion);
+		
+		//Añadir nuevo ambito para la funcion
+		scopeManager.openScope(nombre);
+			
+		//Añadir identificador de la funcion en tabla simbolos
+		TypeIF tipoIf = scopeManager.searchType(nombre); //Tipo funcion
+		TypeIF returnType = scopeManager.searchType("ENTERO"); //Tipo devuelto
+		SymbolFunction funcion = new SymbolFunction(ambito, nombre, tipoIf, returnType);
+		tablaSimbolos.addSymbol(funcion);
+							
+		:} seccionParametros:dec CLOSE_KEY
+		
+		{:
+		
+		//ACCIONES
+		//Añadir listado parametros al simbolo de la funcion
+		//Recuperar ambito de la funcion
+		//Añadir parametros a la tabla de simbolos  de la funcion 
+		
+		String nombre = ide.getLexema(); //Nombre funcion	
+		ArrayList<Parametro> lista = new ArrayList<Parametro>(); //Lista objetos Parametro
+		lista = ((DeclaracionParametros) dec).getLista(); //Copiar lista parametros
+		Collections.reverse(lista); //Ordenar lista segun el orden de la lista de parametros de la funcion
+		
+		int tam = lista.size(); //Tamaño de la lista de parametros
+		Parametro elemenParametro = new Parametro(); //Objeto Parametro
+		
+		SymbolIF funcion = scopeManager.searchSymbol(nombre); //Recuperar simbolo funcion de la tabla de simbolos	
+		((SymbolFunction)funcion).setListadoParametros(lista); //Añadir listado parametros al simbolo funcion
+		
+		//Recuperar ambito actual, tabla de simbolos y añadir parametros
+		ScopeIF ambitoFuncion = scopeManager.getCurrentScope();
+		SymbolTableIF tablaSimbolos = ambitoFuncion.getSymbolTable();
+		
+		for (int x = 0; x < tam; x++) {
+			SymbolVariable variable = new SymbolVariable(ambitoFuncion, lista.get(x).getNombre(), lista.get(x).getTipo());
+			tablaSimbolos.addSymbol(variable);
+		}
+		
+		:}  OPEN_PARENTHESIS seccionTipos funcionFactorizado 
+		
+
+| VACIO IDENTIFICADOR:ide OPEN_KEY
+	
+		{:
+		
+		//ACCIONES
+		//Comprobar si el tipo ha sido declarado en el ambito actual
+		//Comprobar si el simbolo ha sido declarado en el ambito actual
+		//Añadir procedimiento en la tabla de tipos
+		//Añadir identificador del  procedimiento en tabla simbolos ambito (ambito, nombre, tipo, retorno)
+		//Añadir nuevo ambito para el procedimiento
+		
+		String nombre = ide.getLexema();  //Nombre del procedimiento
+		
+		//Recuperar ambito actual, tabla de simbolos y tabla de tipos
+		ScopeIF ambito = scopeManager.getCurrentScope();
+		SymbolTableIF tablaSimbolos = ambito.getSymbolTable();
+		TypeTableIF tablaTipos = ambito.getTypeTable();
+		
+		//Comprobar si el simbolo/tipo existe
+		if (tablaSimbolos.containsSymbol(nombre)) {
+			semanticErrorManager.semanticFatalError("Error :  el simbolo " + nombre + " ya existe.");
+		}
+		
+		if (tablaTipos.containsType(nombre)) {
+			semanticErrorManager.semanticFatalError("Error :  el tipo " + nombre + " ya existe.");
+		}
+		
+		//Añadir procedimiento en la tabla de tipos
+		TypeProcedure tipoProcedimiento = new TypeProcedure(ambito,nombre);	
+		tablaTipos.addType(nombre,tipoProcedimiento);
+		
+		//Añadir identificador del procedimiento en tabla simbolos
+		TypeIF tipoIf = scopeManager.searchType(nombre); //Tipo procedimiento
+		TypeIF returnType = scopeManager.searchType("VACIO"); //Tipo devuelto
+		SymbolProcedure procedimiento = new SymbolProcedure(ambito, nombre, tipoIf, returnType);
+		tablaSimbolos.addSymbol(procedimiento);
+		
+		//Añadir nuevo ambito para el procedimiento
+		scopeManager.openScope(ide.getLexema());
+							
+		:} seccionParametros:dec CLOSE_KEY
+	
+		{:
+		
+		//ACCIONES
+		//Añadir listado parametros al simbolo del procedimiento
+		//Recuperar ambito del procedimiento
+		//Añadir parametros a la tabla de simbolos  del procedimiento 
+		
+		String nombre = ide.getLexema(); //Nombre procedimiento	
+		ArrayList<Parametro> lista = new ArrayList<Parametro>(); //Lista objetos Parametro
+		lista = ((DeclaracionParametros) dec).getLista(); //Copiar lista parametros
+		Collections.reverse(lista); //Ordenar lista segun el orden de la lista de parametros del procedimiento
+		
+		int tam = lista.size(); //Tamaño de la lista de parametros
+		Parametro elemenParametro = new Parametro(); //Objeto Parametro
+		
+		SymbolIF procedimiento = scopeManager.searchSymbol(nombre); //Recuperar simbolo procedimiento de la tabla de simbolos	
+		((SymbolProcedure)procedimiento).setListadoParametros(lista); //Añadir listado parametros al simbolo procedimiento
+		
+		//Recuperar ambito actual, tabla de simbolos y añadir parametros
+		ScopeIF ambitoProcedimiento = scopeManager.getCurrentScope();
+		SymbolTableIF tablaSimbolos = ambitoProcedimiento.getSymbolTable();
+		
+		for (int x = 0; x < tam; x++) {
+			//elemenParametro = lista.get(x);
+			SymbolVariable variable = new SymbolVariable(ambitoProcedimiento, lista.get(x).getNombre(), lista.get(x).getTipo());
+			tablaSimbolos.addSymbol(variable);
+		}
+				
+		:} OPEN_PARENTHESIS seccionTipos funcionFactorizado ;
+		
+
+funcionPrincipal ::= VACIO PRINCIPAL:ide OPEN_KEY     
+
+		{:	
+		
+		//ACCIONES
+		//Comprobar si el tipo ha sido declarado en el ambito actual
+		//Comprobar si el simbolo ha sido declarado en el ambito actual
+		//Añadir procedimiento en la tabla de tipos
+		//Añadir identificador del  procedimiento en tabla simbolos ambito (ambito, nombre, tipo, retorno)
+		//Añadir nuevo ambito para el procedimiento
+		
+		String nombre = ide.getLexema();  //Nombre del procedimiento
+		
+		//Recuperar ambito actual, tabla de simbolos y tabla de tipos
+		ScopeIF ambito = scopeManager.getCurrentScope();
+		SymbolTableIF tablaSimbolos = ambito.getSymbolTable();
+		TypeTableIF tablaTipos = ambito.getTypeTable();
+		
+		//Comprobar si el simbolo/tipo existe
+		if (tablaSimbolos.containsSymbol(nombre)) {
+			semanticErrorManager.semanticFatalError("Error :  el simbolo " + nombre + " ya existe.");
+		}
+		
+		if (tablaTipos.containsType(nombre)) {
+			semanticErrorManager.semanticFatalError("Error :  el tipo " + nombre + " ya existe.");
+		}
+		
+		//Añadir procedimiento en la tabla de tipos
+		TypeProcedure tipoProcedimiento = new TypeProcedure(ambito,nombre);	
+		tablaTipos.addType(nombre,tipoProcedimiento);
+		
+		//Añadir identificador del procedimiento en tabla simbolos
+		TypeIF tipoIf = scopeManager.searchType(nombre); //Tipo procedimiento
+		TypeIF returnType = scopeManager.searchType("VACIO"); //Tipo devuelto
+		SymbolProcedure procedimiento = new SymbolProcedure(ambito, nombre, tipoIf, returnType);
+		tablaSimbolos.addSymbol(procedimiento);
+		
+		//Añadir nuevo ambito para el procedimiento
+		scopeManager.openScope(ide.getLexema());
+			
+		:} CLOSE_KEY OPEN_PARENTHESIS seccionTipos funcionFactorizado:lisSen
+		
+		{:
+		
+			RESULT = (ListadoSentencias)lisSen;
+		
+		:};
+
+
+
+funcionFactorizado ::= listadoSentencias:lisSen CLOSE_PARENTHESIS     
+
+		{:	
+			
+		//Recuperar ambito y nombre subprograma
+		ScopeIF ambito = scopeManager.getCurrentScope();
+		String nombreSubprograma = ambito.getName();
+
+		//Buscar simbolo con el nombre del procedimiento
+		SymbolIF identificadorSubrograma = scopeManager.searchSymbol(nombreSubprograma); 
+		
+		int numero = ((SymbolProcedure)identificadorSubrograma).getSentenciaDevuelve(); //Numero sentencias devuelve en el subprograma
+		
+		//Si el numero de sentencias devuelve es distinto de 1 Error
+		if(!(numero == 1)) {
+			semanticErrorManager.semanticFatalError("Error :  numero sentencias 'devuelve' en subprograma " + nombreSubprograma + " = " + numero);
+		}
+					
+		scopeManager.closeScope(); //Cerrar ambito 	
+		
+		RESULT = (ListadoSentencias)lisSen;
+		
+		:}
+	
+| seccionVariables listadoSentencias:lisSen CLOSE_PARENTHESIS
+	
+		{:
+						
+		//Recuperar ambito y nombre subprograma
+		ScopeIF ambito = scopeManager.getCurrentScope();
+		String nombreSubprograma = ambito.getName();
+
+		//Buscar simbolo con el nombre del procedimiento
+		SymbolIF identificadorSubrograma = scopeManager.searchSymbol(nombreSubprograma); 
+		
+		//Si el numero de sentencias devuelve es distinto de 1 Error
+		int numero = ((SymbolProcedure)identificadorSubrograma).getSentenciaDevuelve(); //Numero sentencias devuelve en el subprograma
+		if(!(numero == 1))  {
+			semanticErrorManager.semanticFatalError("Error :  numero sentencias 'devuelve' en subprograma " + nombreSubprograma + " = " + numero);
+		}
+	 
+		scopeManager.closeScope(); 	//Cerrar ambito
+		
+		RESULT = (ListadoSentencias)lisSen;
+		
+		:};
+
+
+seccionParametros ::= declaracionParametros:dec
+
+		{:
+			
+			RESULT = dec;
+		
+		:}
+	
+| epsilon {: RESULT = new DeclaracionParametros();:};
+
+
+declaracionParametros  ::= parametro:par COLON declaracionParametros:lispar
+
+		{:
+		
+		DeclaracionParametros lista = new DeclaracionParametros(); //Lista de parametros
+		lista.setLista(lispar.getLista()); //Copiar lista anterior
+		Parametro parametro = new Parametro(par.getTipo(),par.getNombre()); //Objeto Parametro
+		lista.addParametro(parametro); //Añadir a la lista de parametros 
+		
+		RESULT = lista; //Retornar lista de parametros	
+		
+		:}
+		
+| parametro:par
+
+		{:
+		
+		DeclaracionParametros lista = new DeclaracionParametros(); //Lista de parametros
+		Parametro parametro = new Parametro(par.getTipo(),par.getNombre()); //Objeto Parametro
+		lista.addParametro(parametro); //Añadir a la lista de parametros 
+		
+		RESULT = lista; //Retornar lista de parametros
+		
+		:};
+
+
+parametro ::= ENTERO IDENTIFICADOR:ide
+
+		{:
+		
+		String nombre = ide.getLexema(); //Nombre del parametro	
+		TypeIF tipoIf = scopeManager.searchType("ENTERO"); //Objeto
+		Parametro parametro = new Parametro(tipoIf, nombre);//Objeto parametro
+		
+		RESULT = parametro; //Retornar parametro
+		
+		:}
+
+| IDENTIFICADOR:tip IDENTIFICADOR:ide
+
+		{:
+		
+		String nombre = ide.getLexema(); //Nombre del parametro	
+		Boolean existe; //Tipo existe	
+		String tipo; //Tipo del parametro
+		
+		//Comprobar si tipo del parametro ha sido declarado en todos los ambitos alcanzables. Si no existe error.
+		tipo = tip.getLexema(); //Nombre del tipo
+		existe = scopeManager.containsType(tipo); //existe
+		
+		if (!existe) {
+			semanticErrorManager.semanticFatalError("Error :  el tipo " + tipo + " no existe.");
+		} else 			{
+			TypeIF tipoIf = scopeManager.searchType(tipo); //Objeto
+			Parametro parametro = new Parametro(tipoIf, nombre);//Objeto parametro
+					
+			RESULT = parametro; //Retornar parametro				
+		}	
+		:};
+
+
+// EXPRESIONES
+
+expresion ::= NUMERO:num      
+
+		{:
+		
+		int linea = num.getLine(); //Linea del token
+		Integer valor = Integer.valueOf(num.getLexema()); //Valor de la constante literal
+		ScopeIF ambito = scopeManager.getCurrentScope();
+		TypeSimple tipo = new TypeSimple(ambito,"ENTERO");		
+		
+		
+							// **** Codigo intermedio **** //
+							Expresion expresion = new Expresion(tipo, valor, linea); //Objeto
+							TemporalFactory factoryTMP = new TemporalFactory(ambito); //Factory TMP
+							IntermediateCodeBuilder codeBuilder = new IntermediateCodeBuilder(ambito); //Code Builder
+							
+							TemporalIF temporal = factoryTMP.create();
+							
+							Value valorBis = new Value(valor);
+							codeBuilder.addQuadruple("MV", temporal, valorBis); // Temporal = ValorBis
+							
+							expresion.setTemporal(temporal);
+							expresion.setIntermediateCode(codeBuilder.create());
+			
+		RESULT = expresion;
+			
+		:}
+
+| IDENTIFICADOR:ide     
+	
+		{:
+		
+		int linea = ide.getLine(); //Linea del token
+		String nombre = ide.getLexema(); //Nombre del identificador
+		
+		//Comprobar si existe el identificador en todos los ambitos alcanzables
+		if (!(scopeManager.containsSymbol(nombre)))
+		{
+			semanticErrorManager.semanticFatalError("Error linea: " + linea + ", el identificador " + nombre + " no existe.");
+		}
+		
+		SymbolIF identificador = scopeManager.searchSymbol(nombre); //Recuperar objeto simbolo del  identificador de la tabla de simbolos
+		TypeIF tipo = identificador.getType(); //Tipo del identificador
+				
+		//si el identificador es tipo array no deberia pasar por aqui, ERROR
+		if (tipo instanceof TypeArray)
+			{
+				semanticErrorManager.semanticFatalError("Error linea: " + linea + " , el identificador tipo vector: " + nombre + " referencia la estructura completa.");
+			}
+		
+		
+			
+							// **** Codigo intermedio **** //
+							Expresion expresion = new Expresion(); //Objeto							
+							if (identificador instanceof SymbolConstant) //Si constante simbolica añadimos su valor al objeto Expresion	
+								{
+									Integer valorConstante = ((SymbolConstant)identificador).getValue(); //Valor de la constante simbolica
+									expresion.setTipo(tipo);
+									expresion.setLinea(linea);
+									expresion.setValor(valorConstante);
+								} else {
+									expresion.setTipo(tipo);
+									expresion.setLinea(linea);
+									
+								}
+							
+							ScopeIF ambito = scopeManager.getCurrentScope(); //Ambito
+							TemporalFactory factoryTMP = new TemporalFactory(ambito); //Factory TMP
+							IntermediateCodeBuilder codeBuilder = new IntermediateCodeBuilder(ambito); //Code Builder
+							
+							TemporalIF temporal = factoryTMP.create();
+							
+							if (identificador instanceof SymbolConstant) //Constante
+								{
+									Value valor = new Value(((SymbolConstant)identificador).getValue());
+									codeBuilder.addQuadruple("MV", temporal, valor); // Temporal = Valor
+								} else if (identificador instanceof SymbolVariable) { //Variable
+									Variable variable = new Variable(nombre, identificador.getScope());
+									codeBuilder.addQuadruple("MVP", temporal, variable); // Temporal = valor apuntado por variable
+								} 
+							
+							expresion.setTemporal(temporal);
+							expresion.setIntermediateCode(codeBuilder.create());
+		
+		RESULT = expresion; 
+
+	:}
+
+|  OPEN_KEY expresion:exp CLOSE_KEY     
+	
+		{:
+			
+		RESULT = exp;
+			
+		:}
+ 	
+|  expresion:exp1 PLUS expresion:exp2     
+
+		{:
+			
+		//Comprobar que ambas expresiones son del mismo tipo
+		int linea = exp1.getLinea(); //Linea del token
+		if(!(exp1.getTipo().getName().equals(exp1.getTipo().getName())))
+			{
+				semanticErrorManager.semanticFatalError("Error linea: " + linea + " , los tipos no coinciden");
+			}
+			
+		ScopeIF ambito = scopeManager.getCurrentScope();
+		TypeSimple tipo = new TypeSimple(ambito,"ENTERO");
+		
+		
+							// **** Codigo intermedio **** //
+							Expresion expresion = new Expresion(tipo, linea); //Objeto
+							TemporalFactory factoryTMP = new TemporalFactory(ambito); //Factory TMP
+							IntermediateCodeBuilder codeBuilder = new IntermediateCodeBuilder(ambito); //Code Builder
+							
+							TemporalIF temp1 = exp1.getTemporal();
+							TemporalIF temp2 = exp2.getTemporal();
+							TemporalIF temporal = factoryTMP.create();
+							
+							codeBuilder.addQuadruples(exp1.getIntermediateCode());
+							codeBuilder.addQuadruples(exp2.getIntermediateCode());
+							codeBuilder.addQuadruple("ADD", temporal, temp1, temp2);
+							
+							expresion.setTemporal(temporal);
+							expresion.setIntermediateCode(codeBuilder.create());
+			
+		RESULT = expresion;
+			
+		:}
+		
+|  expresion:exp1 MULT expresion:exp2     
+ 	
+		{:
+			
+		//Comprobar que ambas expresiones son del mismo tipo
+		int linea = exp1.getLinea(); //Linea del token
+		if(!(exp1.getTipo().getName().equals(exp1.getTipo().getName())))
+			{
+				semanticErrorManager.semanticFatalError("Error linea: " + linea + " , los tipos no coinciden");
+			}
+			
+		
+		ScopeIF ambito = scopeManager.getCurrentScope();
+		TypeSimple tipo = new TypeSimple(ambito,"ENTERO");
+				
+		
+							// **** Codigo intermedio **** //
+							Expresion expresion = new Expresion(tipo, linea); //Objeto
+							TemporalFactory factoryTMP = new TemporalFactory(ambito); //Factory TMP
+							IntermediateCodeBuilder codeBuilder = new IntermediateCodeBuilder(ambito); //Code Builder
+							
+							TemporalIF temp1 = exp1.getTemporal();
+							TemporalIF temp2 = exp2.getTemporal();
+							TemporalIF temporal = factoryTMP.create();
+							
+							codeBuilder.addQuadruples(exp1.getIntermediateCode());
+							codeBuilder.addQuadruples(exp2.getIntermediateCode());
+							codeBuilder.addQuadruple("MUL", temporal, temp1, temp2);
+							
+							expresion.setTemporal(temporal);
+							expresion.setIntermediateCode(codeBuilder.create());
+			
+		RESULT = expresion;
+			
+		:}
+			
+|  expresion:exp AUTO_INCREMENTO     
+
+		{:
+		
+		//Puede ser una constante literal, una variable entera(IDENTIFICADOR)  o una posicion de un vector. 
+		TypeIF tipoExpresion = exp.getTipo(); //Tipo de la expresion
+		int linea = exp.getLinea(); //Linea del token
+		
+		if ((tipoExpresion instanceof TypeSimple)) //Variable
+		{
+			if(!(tipoExpresion.getName().equals("ENTERO"))) //Comprobar que expresion es un literal numerico o una variable Entero
+			{
+				semanticErrorManager.semanticFatalError("Error linea: " + linea + " , tipo incorrecto");
+			}
+		}
+		
+		if ((tipoExpresion instanceof TypeArray)) //Vector
+		{
+			TypeIF tipoExpresionAccesoVector = scopeManager.searchType(tipoExpresion.getName());
+			String tipoExpresionAV = ((TypeArray)tipoExpresionAccesoVector).getTipo().getName();
+			
+			if(!(tipoExpresionAV.equals("ENTERO"))) //Comprobar que el tipo del vector es Entero
+			{
+				semanticErrorManager.semanticFatalError("Error linea: " + linea + " , tipo incorrecto");
+			}
+			
+		}
+				
+		ScopeIF ambito = scopeManager.getCurrentScope();
+		TypeSimple tipo = new TypeSimple(ambito,"ENTERO");
+		
+			
+							// **** Codigo intermedio **** //
+							Expresion expresion = new Expresion(tipo, linea); //Objeto
+							TemporalFactory factoryTMP = new TemporalFactory(ambito); //Factory TMP
+							IntermediateCodeBuilder codeBuilder = new IntermediateCodeBuilder(ambito); //Code Builder
+							
+							TemporalIF temporal = factoryTMP.create();
+							TemporalIF tempExpresion = exp.getTemporal();  
+						
+							codeBuilder.addQuadruples(exp.getIntermediateCode()); //Añadir cuadruplas expresion
+							codeBuilder.addQuadruple("INC", temporal, tempExpresion);
+							
+							expresion.setTemporal(temporal);
+							expresion.setIntermediateCode(codeBuilder.create());
+			
+		RESULT = expresion;
+			
+		:}
+ 	
+|  NEGACION expresion:exp     
+ 	
+		{:
+				
+		//Comprobar que expresion es un literal numerico o una variable Entero
+		int linea = exp.getLinea(); //Linea del token
+		
+		if(!(exp.getTipo().getName().equals("ENTERO")))
+			{
+				semanticErrorManager.semanticFatalError("Error linea: " + linea + " , tipo incorrecto");
+			}
+			
+		ScopeIF ambito = scopeManager.getCurrentScope();
+		TypeSimple tipo = new TypeSimple(ambito,"ENTERO");
+		Expresion expresion = new Expresion(tipo, linea);
+		expresion.SetExpresionLogica(); //Se define expresion como logica
+		
+							// **** Codigo intermedio **** //
+							TemporalFactory factoryTMP = new TemporalFactory(ambito); //Factory TMP
+							IntermediateCodeBuilder codeBuilder = new IntermediateCodeBuilder(ambito); //Code Builder
+							
+							TemporalIF temporal = factoryTMP.create();
+							TemporalIF tempExpresion = exp.getTemporal(); //Recuperar expresion
+						
+							codeBuilder.addQuadruples(exp.getIntermediateCode()); //Añadir cuadruplas expresion
+							codeBuilder.addQuadruple("NOT", temporal, tempExpresion);
+							
+							expresion.setTemporal(temporal);
+							expresion.setIntermediateCode(codeBuilder.create());
+			
+		RESULT = expresion;
+			
+		:}
+ 	
+ 	
+ |  expresion:exp1 LOWER_THAN expresion:exp2     
+ 	
+		{:
+			
+		//Comprobar que ambas expresiones son del mismo tipo
+		int linea = exp1.getLinea(); //Linea del token
+		
+		if(!(exp1.getTipo().getName().equals(exp1.getTipo().getName())))
+			{
+				semanticErrorManager.semanticFatalError("Error linea: " + linea + " , los tipos no coinciden");
+			}
+			
+		ScopeIF ambito = scopeManager.getCurrentScope();
+		TypeSimple tipo = new TypeSimple(ambito,"ENTERO");
+		Expresion expresion = new Expresion(tipo, linea);
+		expresion.SetExpresionLogica(); //Se define expresion como logica
+		
+							
+							// **** Codigo intermedio **** //
+							TemporalFactory factoryTMP = new TemporalFactory(ambito); //Factory TMP
+							IntermediateCodeBuilder codeBuilder = new IntermediateCodeBuilder(ambito); //Code Builder
+							
+							TemporalIF temp1 = exp1.getTemporal();
+							TemporalIF temp2 = exp2.getTemporal();
+							TemporalIF temporal = factoryTMP.create();
+							
+							codeBuilder.addQuadruples(exp1.getIntermediateCode()); //Añadir cuadruplas expresion1
+							codeBuilder.addQuadruples(exp2.getIntermediateCode()); //Añadir cuadruplas expresion2
+							codeBuilder.addQuadruple("LS", temporal, temp1, temp2);
+							
+							expresion.setTemporal(temporal);
+							expresion.setIntermediateCode(codeBuilder.create());	
+				
+		RESULT = expresion;
+			
+		:}
+		
+|  expresion:exp1 EQUAL expresion:exp2     
+ 	
+		{:
+				
+		//Comprobar que ambas expresiones son del mismo tipo
+		int linea = exp1.getLinea(); //Linea del token
+		
+		if(!(exp1.getTipo().getName().equals(exp1.getTipo().getName())))
+			{
+				semanticErrorManager.semanticFatalError("Error linea: " + linea + " , los tipos no coinciden");
+			}
+			
+		ScopeIF ambito = scopeManager.getCurrentScope();
+		TypeSimple tipo = new TypeSimple(ambito,"ENTERO");
+		Expresion expresion = new Expresion(tipo, linea);
+		expresion.SetExpresionLogica(); //Se define expresion como logica
+		
+							// **** Codigo intermedio **** //
+							TemporalFactory factoryTMP = new TemporalFactory(ambito); //Factory TMP
+							IntermediateCodeBuilder codeBuilder = new IntermediateCodeBuilder(ambito); //Code Builder
+							
+							TemporalIF temp1 = exp1.getTemporal();
+							TemporalIF temp2 = exp2.getTemporal();
+							TemporalIF temporal = factoryTMP.create();
+							
+							codeBuilder.addQuadruples(exp1.getIntermediateCode()); //Añadir cuadruplas expresion1
+							codeBuilder.addQuadruples(exp2.getIntermediateCode()); //Añadir cuadruplas expresion2
+							codeBuilder.addQuadruple("EQ", temporal, temp1, temp2);
+							
+							expresion.setTemporal(temporal);
+							expresion.setIntermediateCode(codeBuilder.create());
+				
+		RESULT = expresion;
+			
+		:}
+		
+|  expresion:exp1 AND_LOGICA expresion:exp2     
+ 	
+		{:
+			
+		//Comprobar que ambas expresiones son del mismo tipo
+		int linea = exp1.getLinea(); //Linea del token
+		
+		if(!(exp1.getTipo().getName().equals(exp1.getTipo().getName())))
+			{
+				semanticErrorManager.semanticFatalError("Error linea: " + linea + " , los tipos no coinciden");
+			}
+		
+		ScopeIF ambito = scopeManager.getCurrentScope();
+		TypeSimple tipo = new TypeSimple(ambito,"ENTERO");
+		Expresion expresion = new Expresion(tipo, linea);
+		expresion.SetExpresionLogica(); //Se define expresion como logica
+		
+							// **** Codigo intermedio **** //
+							TemporalFactory factoryTMP = new TemporalFactory(ambito); //Factory TMP
+							IntermediateCodeBuilder codeBuilder = new IntermediateCodeBuilder(ambito); //Code Builder
+							
+							TemporalIF temp1 = exp1.getTemporal();
+							TemporalIF temp2 = exp2.getTemporal();
+							TemporalIF temporal = factoryTMP.create();
+							
+							codeBuilder.addQuadruples(exp1.getIntermediateCode()); //Añadir cuadruplas expresion1
+							codeBuilder.addQuadruples(exp2.getIntermediateCode()); //Añadir cuadruplas expresion2
+							codeBuilder.addQuadruple("AND", temporal, temp1, temp2);
+							
+							expresion.setTemporal(temporal);
+							expresion.setIntermediateCode(codeBuilder.create());	
+				
+		RESULT = expresion;
+			
+		:}
+			
+|  accesoVector:acc     
+ 	
+		{:
+		
+
+		//Devolvemos el tipo	 
+		TypeIF tipo = ((Ref)acc).getTipo();
+		Expresion expresion = new Expresion(tipo);
+		
+							// **** Codigo intermedio **** //
+							ScopeIF ambito = scopeManager.getCurrentScope(); //Ambito
+							TemporalFactory factoryTMP = new TemporalFactory(ambito); //Factory TMP
+							IntermediateCodeBuilder codeBuilder = new IntermediateCodeBuilder(ambito); //Code Builder
+							
+							TemporalIF temporal = ((Ref)acc).getTemporal();  //Recuperar expresion acceso
+							TemporalIF temp2 = factoryTMP.create();
+							
+							codeBuilder.addQuadruples(((Ref)acc).getIntermediateCode()); //Añadir cuadruplas expresion acceso vector							
+							codeBuilder.addQuadruple("MVP", temp2, temporal); //Temp2 = contenido apuntado por temporal
+							
+							expresion.setTemporal(temp2);							
+							expresion.setIntermediateCode(codeBuilder.create());
+		
+		RESULT = (Expresion)expresion;
+			
+		:}
+
+|  llamadaFuncion:exp //Codigo intermedio no implementado, se devuelve siempre valor 0
+ 	
+		{:
+		
+		SymbolIF simboloLlamada = ((LlamadaFuncion)exp).getFuncion(); //Recuperar el tipo que devuelve la funcion
+		TypeIF tipo = ((SymbolProcedure)simboloLlamada).getTipoDevuelto();
+		Expresion expresion = new Expresion(tipo); //Devolvemos el tipo
+		
+		ScopeIF ambito = scopeManager.getCurrentScope();
+		
+							// **** Codigo intermedio **** //
+							TemporalFactory factoryTMP = new TemporalFactory(ambito); //Factory TMP
+							IntermediateCodeBuilder codeBuilder = new IntermediateCodeBuilder(ambito); //Code Builder
+							
+							TemporalIF temporal = factoryTMP.create();
+							
+							Value valor = new Value(0); //al llamar a una funcion en la parte de la expresion devolvemos siempre un 0 para evitar errores en el emsamblador
+							codeBuilder.addQuadruple("MV", temporal, valor); // Temporal = Valor
+							
+							expresion.setTemporal(temporal);
+							expresion.setIntermediateCode(codeBuilder.create());
+		
+		RESULT = expresion;
+			
+		:};
+
+
+accesoVector ::= IDENTIFICADOR:ide OPEN_BRACKET expresion:exp CLOSE_BRACKET     
+
+		{:	
+				
+		//ACCIONES
+		//Verificar IDENTIFICADOR es una variable tipo vector
+		//Verificar tipo de expresion es compatible con el valor esperado (constante literal, simbolica o variable tipo entero)
+		//Verificar indices vector
+
+		String nombre = ide.getLexema(); //Nombre del identificador
+		int linea = ide.getLine(); //Linea del token
+				
+		//Comprobar existencia del identificador en todos los ambitos alcanzables
+		if(!scopeManager.containsSymbol(nombre))  {
+			semanticErrorManager.semanticFatalError("Error linea: " + ide.getLine() + " , el identificador " + nombre + " no existe en este ambito.");
+		}
+		
+		SymbolIF identificador = scopeManager.searchSymbol(nombre); //Recuperar objeto simbolo del  identificador de la tabla de simbolos
+		TypeIF tipo = identificador.getType(); //Tipo del identificador
+		String tipoIdentificador = ((TypeArray)tipo).getTipo().getName(); //Recuperar tipo del identificador
+		
+		//Comprobar si el tipo del identificador es tipo vector, si no es tipo vector error	
+		if (!(tipo instanceof TypeArray)) {
+			semanticErrorManager.semanticFatalError("Error linea: " + ide.getLine() + " , el identificador " + nombre + " no es tipo vector");
+		}
+		
+		//Recuperar el tipo de la expresion
+		String tipoExpresion = exp.getTipo().getName(); //Nombre de la expresion	
+		TypeIF tipoExpresionAccesoVector = scopeManager.searchType(tipoExpresion); //Tipo de la expresion
+				
+		//Si expresion es tipo vector recuperamos su tipo para realizar el control de tipos
+		if (tipoExpresionAccesoVector instanceof TypeArray) {
+			String tipoExpresionAV = ((TypeArray)tipoExpresionAccesoVector).getTipo().getName(); //Nombre del tipo
+					
+			if (!(tipoIdentificador.equals(tipoExpresionAV))) {
+				semanticErrorManager.semanticFatalError("Error linea: " + ide.getLine() + " , los tipos no coinciden");
+			}
+			
+		} else {
+				
+			if (!(tipoIdentificador.equals(tipoExpresion))) {
+				semanticErrorManager.semanticFatalError("Error linea: " + ide.getLine() + " , los tipos no coinciden");
+			}
+		}
+
+		//verificar si valor de la constante literal/simbolica esta entre los indices del vector	
+		if (!(exp.getValor() == null)) {
+			int tamanoVector = tipo.getSize(); //tamaño del vector
+			int valorExpresion = exp.getValor(); //Valor del literal numerico
+			
+			if (!(valorExpresion <= (tamanoVector - 1))) {
+				semanticErrorManager.semanticFatalError("Error linea: " + ide.getLine() + " , el indice del vector es incorrecto ");
+			}
+		}
+									
+							// **** Codigo intermedio **** //
+							Ref referencia = new Ref(nombre, tipo, linea); //Objeto
+							ScopeIF ambito = scopeManager.getCurrentScope(); //Ambito
+							TemporalFactory factoryTMP = new TemporalFactory(ambito); //Factory TMP
+							IntermediateCodeBuilder codeBuilder = new IntermediateCodeBuilder(ambito); //Code Builder
+							
+							TemporalIF temp1 = factoryTMP.create();
+							TemporalIF temp2 = factoryTMP.create();
+							
+							codeBuilder.addQuadruples(exp.getIntermediateCode()); //añadir al codigo intermedio la cuadrupla de la expresione
+							
+							//Accion ajustar el desplazamiento (índice vector)
+							TemporalIF tempPosicion = exp.getTemporal();	
+							Variable variable = new Variable(nombre, identificador.getScope());
+							
+							codeBuilder.addQuadruple("MVA", temp1, variable); //Temp1 = valor base direccion de memoria de variable
+							codeBuilder.addQuadruple("SUB", temp2, temp1, tempPosicion); //guardamos en temp2 la direccion de memoria de la variable (base) - desplazamiento
+							
+							referencia.setTemporal(temp2); //Direccion ajustada
+							referencia.setIntermediateCode(codeBuilder.create());
+
+		RESULT = referencia;
+		
+		:};
+
+
+llamadaFuncion ::= IDENTIFICADOR:ide OPEN_KEY parametros:par  
+		{:
+	
+		//ACCIONES
+		//Comprobar que el identificador del subprograma existe
+		//Comprobar  parametros actuales = parametros formales (en número, tipo y orden)
+		
+		String nombre = ide.getLexema(); //Nombre del identificador
+		
+		if (!(scopeManager.containsSymbol(nombre)))
+			{
+				semanticErrorManager.semanticFatalError("Error linea: " + ide.getLine() + " , el identificador " + nombre + " no existe.");
+			}
+		
+		SymbolIF identificador = scopeManager.searchSymbol(nombre); //Recuperar simbolo
+		
+		ArrayList<Parametro> listaParametrosFormales = new ArrayList<Parametro>(); //Lista objetos Parametro 
+		listaParametrosFormales = ((SymbolProcedure)identificador).getListadoParametros(); //Obtener lista parametros formales
+				
+		ArrayList<TypeIF> listaParametrosActuales = new ArrayList<TypeIF>(); //Lista objetos TypeIF
+		listaParametrosActuales = ((Parametros) par).getLista(); //Obtener lista parametros actuales
+		Collections.reverse(listaParametrosActuales); //Ordenar lista segun el orden de la lista de parametros del subprograma
+		
+		//Comprobar numero parametros correcto
+		if (!(listaParametrosActuales.size() == listaParametrosFormales.size())) {
+			semanticErrorManager.semanticFatalError("Error linea: " + ide.getLine() + " , numero parametros incorrecto.");
+		} 
+		
+		//Comprobar tipo y orden			
+		for (int x = 0; x < listaParametrosActuales.size(); x++) {
+			//Parametros actuales y formales tipo vector
+			if (listaParametrosActuales.get(x) instanceof TypeArray && listaParametrosFormales.get(x).getTipo() instanceof TypeArray ) {
+				if (!(listaParametrosActuales.get(x).getName().equals(listaParametrosFormales.get(x).getTipo().getName()))) {
+					semanticErrorManager.semanticFatalError("Error linea: " + ide.getLine() + " , tipo/orden  parametros incorrecto.");	
+				}
+				
+			//Parametros actuales tipo vector	
+			} else if (listaParametrosActuales.get(x) instanceof TypeArray) {
+				if (!(((TypeArray)listaParametrosActuales.get(x)).getTipo().getName().equals(listaParametrosFormales.get(x).getTipo().getName())))  {
+					semanticErrorManager.semanticFatalError("Error linea: " + ide.getLine() + " , tipo/orden  parametros incorrecto.");	
+				}
+			} else {
+				if (!(listaParametrosActuales.get(x).getName().equals(listaParametrosFormales.get(x).getTipo().getName()))) {
+					semanticErrorManager.semanticFatalError("Error linea: " + ide.getLine() + " , tipo/orden  parametros incorrecto.");	
+				}
+			}	
+		} 
+	
+		LlamadaFuncion identificadorLlamada = new LlamadaFuncion (identificador); //Objeto
+		
+		RESULT = identificadorLlamada; 
+	
+		:} CLOSE_KEY
+
+| IDENTIFICADOR:ide OPEN_KEY
+
+		{:
+		
+		//ACCIONES
+		//Comprobar que el identificador del subprograma existe
+		
+		String nombre = ide.getLexema(); //Nombre del identificador			
+		SymbolIF identificador = scopeManager.searchSymbol(nombre); //Recuperar simbolo
+		
+		if (!(scopeManager.containsSymbol(nombre))) {
+			semanticErrorManager.semanticFatalError("Error linea: " + ide.getLine() + " , el identificador " + nombre + " no existe.");
+		}
+	
+		LlamadaFuncion identificadorLlamada = new LlamadaFuncion (identificador);
+		
+		RESULT = identificadorLlamada; //Objeto LlamadaFuncion
+		
+		:}	CLOSE_KEY;
+
+	
+parametros ::= expresion:exp //No se implementa Cod. intermedio
+
+		{:
+			
+		Parametros lista = new Parametros(); //Lista de tipos de los parametros del subprograma
+		lista.addParametro(exp.getTipo()); //Añadir el tipo de la expresion 
+	
+		RESULT = lista; //Retornar lista de tipos
+			
+		:}
+
+| expresion:exp COLON parametros:lis
+		
+		{:
+			
+		Parametros lista = new Parametros(); //Lista de tipos de los parametros del subprograma
+		lista.setLista(((Parametros)lis).getLista()); //Copiar lista anterior
+		lista.addParametro(exp.getTipo()); //Añadir el tipo de la expresion 
+	
+		RESULT = lista; //Retornar lista de tipos
+		
+		:};
+
+
+//  SENTENCIAS
+	
+bloque ::= OPEN_PARENTHESIS     
+
+		{:
+
+		//ACCIONES
+		//Abrir nuevo ambito
+		
+		String nombre = "Anonimo"; //Añadir nuevo ambito para el bloque 
+		scopeManager.openScope(nombre);
+		
+		:} bloqueFactorizado:lisSenBloque
+
+		{:
+
+		RESULT = lisSenBloque;
+
+		:} ;
+
+
+bloqueFactorizado ::= seccionVariables listadoSentencias:lisSenBloque CLOSE_PARENTHESIS     
+		
+		{: 
+		
+		scopeManager.closeScope(); 	//Cerrar ambito 
+		
+		RESULT = lisSenBloque;
+
+		:}
+
+| listadoSentencias :lisSenBloque CLOSE_PARENTHESIS
+
+		{:
+		
+		scopeManager.closeScope(); 	//Cerrar ambito 
+		
+		RESULT = lisSenBloque;
+
+		:};
+	
+
+
+listadoSentencias ::= sentencia:sen     
+
+		{:
+
+		ListadoSentencias listaSen = new ListadoSentencias(); //Objeto
+		
+		//Si el objeto es una lista de sentencias, Se recorre la lista y se añaden al listado final
+		if (sen instanceof ListadoSentencias) {
+			ArrayList<Sentencia> listadoSen = new ArrayList<Sentencia>();			
+			listadoSen = ((ListadoSentencias) sen).getListaSentencias();
+								
+			Sentencia sentencia = new Sentencia();
+						
+			for (int x = 0; x < listadoSen.size() ; x++) {
+				sentencia = listadoSen.get(x);
+				if (sentencia != null) { //Comprobar no null
+					listaSen.addSentencia(sentencia);									
+				}	
+			}
+				
+			RESULT = listaSen;
+				
+		} else { //solo una sentencia
+			listaSen.addSentencia(sen); 				
+			RESULT = listaSen;
+		}
+			
+		:} 
+
+|  sentencia:sen listadoSentencias:lisSen
+
+		{: 
+			
+		ListadoSentencias listaSen = new ListadoSentencias();
+		listaSen.setListaSentencias(((ListadoSentencias)lisSen).getListaSentencias());
+		
+		//Si el objeto es una lista de sentencias, se recorre la lista y se añaden al listado final
+		if (sen instanceof ListadoSentencias) {
+			ArrayList<Sentencia> listadoSen = new ArrayList<Sentencia>();			
+			listadoSen = ((ListadoSentencias) sen).getListaSentencias();
+								
+			Sentencia sentencia = new Sentencia();
+						
+				for (int x = 0; x < listadoSen.size() ; x++) {
+					sentencia = listadoSen.get(x);
+					if (sentencia != null){ //Comprobar no null
+						listaSen.addSentencia(sentencia);
+					}
+				}
+					
+			RESULT = listaSen;
+				
+		} else { //solo una sentencia
+			listaSen.addSentencia(sen); 
+			RESULT = listaSen;
+		}
+		
+		:};
+
+	
+sentencia ::= sentenciaDevuelve //No se implementa Cod. intermedio
+	| sentenciaIncremento:sentInc {: RESULT = (Sentencia)sentInc; :} 
+	| sentenciaAsignacion:sentAsi {: RESULT = (Sentencia)sentAsi; :} 
+	| sentenciaAsignacionSuma:sentAsiSum {: RESULT = (Sentencia)sentAsiSum; :} 
+	| sentenciaSi:senSi {: RESULT = (Sentencia)senSi; :} 
+	| sentenciaAlternativas:senAl {: RESULT = (Sentencia)senAl; :} 
+	| sentenciaMientras:senMi  {: RESULT = (Sentencia)senMi; :} 
+	| sentenciaLlamadaFuncion //No se implementa Cod. intermedio
+	| sentenciaSalida:sentSal {: RESULT = (Sentencia)sentSal; :} 
+	| bloque:blo {: RESULT = (ListadoSentencias)blo; :} ;
+
+
+sentenciaDevuelve ::= DEVUELVE 
+		
+		{:
+		
+		//PROCEDIMIENTO: Cada simbolo subprograma, tiene un atributo DEVUELVE Se inicializa a cero para todos los subprogramas
+		//Recupera el ambito donde se llama la sentencia 'devuelve' se recupera el simbolo se suma uno al atributo por cada sentencia DEVUELVE encontrada
+		//Antes de cerrar el ambito del subprograma se verifica si DEVUELVE = 1 Si es distinto de uno es un error.
+		//NO COMPROBAMOS  SI HAY SENTENCIA DEVUELVE EN UN BLOQUE ANONIMO //
+				
+		ScopeIF ambito = scopeManager.getCurrentScope();
+		String nombreSubprograma = ambito.getName();
+		
+		//Comprobar que no estamos en un bloque anonimo. Si estamos en un bloque anonimo no se comprueba el numero de sentencias DEVUELVE
+		if (!(nombreSubprograma.equals("Anonimo"))) {
+			SymbolIF identificadorSubrograma = scopeManager.searchSymbol(nombreSubprograma); //buscar simbolo con el nombre del subprograma
+			((SymbolProcedure)identificadorSubrograma).setSentenciaDevuelve();//Sumar uno al atributo DEVUELVE
+		}
+		
+		:} SEMI_COLON
+
+| DEVUELVE expresion:exp
+		
+		{:
+		
+		//FUNCIONES
+		//Podemos usar el atributo y metodos al heredar de la clase SymbolProcedure
+		ScopeIF ambito = scopeManager.getCurrentScope();
+		String nombreSubprograma = ambito.getName();
+		
+		//Comprobar que no estamos en un bloque anonimo. Si estamos en un bloque anonimo no se comprueba el numero de sentencias DEVUELVE
+		if (!(nombreSubprograma.equals("Anonimo"))) {
+			SymbolIF identificadorSubrograma = scopeManager.searchSymbol(nombreSubprograma); //buscar simbolo con el nombre del subprograma
+			
+			//Comprobar tipo devuelto subprograma y sentencia DEVUELVE
+			TypeIF tipoSubprograma = ((SymbolFunction)identificadorSubrograma).getTipoDevuelto(); //Tipo subprograma
+			String nombreTipoSubprograma = tipoSubprograma.getName();
+			String nombreTipoExpresion = exp.getTipo().getName(); //Nombre de la expresion
+			
+			if (!(nombreTipoSubprograma.equals(nombreTipoExpresion))) {
+				semanticErrorManager.semanticFatalError("Error linea: " + exp.getLinea() + " , el tipo devuelto no coincide con el tipo de la funcion.");
+			}
+			
+			((SymbolProcedure)identificadorSubrograma).setSentenciaDevuelve(); //Sumar uno al atributo DEVUELVE. 
+		} 
+			
+		:}SEMI_COLON;
+
+
+sentenciaIncremento ::= IDENTIFICADOR:ide AUTO_INCREMENTO SEMI_COLON
+		
+		{:
+		
+		//ACCIONES
+		//Comprobar si el tipo es de constante --> ERROR, no se puede cambiar el valor de una constante	
+				
+		String nombre = ide.getLexema(); //Nombre del identificador
+		int linea = ide.getLine(); //Linea del token
+		ScopeIF ambito = scopeManager.getCurrentScope();
+		SymbolIF identificador = scopeManager.searchSymbol(nombre); //Recuperar objeto simbolo del  identificador de la tabla de simbolos
+		
+		if (identificador instanceof SymbolConstant) {
+			semanticErrorManager.semanticFatalError("Error linea: " + ide.getLine() + " , el identificador " + nombre + " corresponde a una constante simbolica.");
+		}
+		
+							// **** Codigo intermedio **** //
+							SentenciaIncremento sentenciaIncremento = new SentenciaIncremento(); //Objeto
+							TemporalFactory factoryTMP = new TemporalFactory(ambito); //Factory TMP
+							IntermediateCodeBuilder codeBuilder = new IntermediateCodeBuilder(ambito); //Code Builder
+							
+							TemporalIF temporal = factoryTMP.create();
+							
+							Variable variable = new Variable(nombre, identificador.getScope());
+							codeBuilder.addQuadruple("MVP", temporal, variable); // Temporal = valor apuntado por variable
+							codeBuilder.addQuadruple("INC", variable, temporal);
+							
+							sentenciaIncremento.setTemporal(temporal);
+							sentenciaIncremento.setIntermediateCode(codeBuilder.create());
+							
+		RESULT = sentenciaIncremento;
+							
+		:};
+
+
+sentenciaAsignacion ::= ref:ref ASSIGN expresion:exp SEMI_COLON     
+
+		{:
+							
+		//ACCIONES
+		//ref se ha verificado en la regla anterior
+		//Realizar el control de tipos entre ref y expresion, tanto ref como expresion, pueden ser un identificador o un vector
+		
+		//Recuperar el tipo de la referencia puede ser un identificador o un vector
+		if ((ref.getTipo() instanceof TypeSimple)) { //Identificador
+		
+			String tipoReferencia = ref.getTipo().getName();
+			String tipoExpresion = exp.getTipo().getName();
+			
+			//Si expresion es tipo vector recuperamos su tipo para realizar el control de tipos	
+			TypeIF tipoExpresionAccesoVector = scopeManager.searchType(tipoExpresion);
+						
+			if (tipoExpresionAccesoVector instanceof TypeArray) {
+				String tipoExpresionAV = ((TypeArray)tipoExpresionAccesoVector).getTipo().getName();
+								
+				if (!(tipoReferencia.equals(tipoExpresionAV))) {
+					semanticErrorManager.semanticFatalError("Error linea: " + ref.getLinea() + " , los tipos no coinciden");
+				}		
+			} else {
+				if (!(tipoReferencia.equals(tipoExpresion))) {
+					semanticErrorManager.semanticFatalError("Error linea: " + ref.getLinea() + " , los tipos no coinciden");
+				}		
+			}
+		}
+		
+		//Recuperar el tipo de la referencia puede ser un identificador o un vector
+		if ((ref.getTipo() instanceof TypeArray)) { //Vector
+			SymbolIF identificador = scopeManager.searchSymbol(ref.getNombre()); //Recuperar simbolo 
+			TypeIF tipo = identificador.getType(); //Tipo 
+			String tipoReferencia = ((TypeArray)tipo).getTipo().getName(); //Recuperar tipo de la referencia
+			String tipoExpresion = exp.getTipo().getName(); //Recuperar tipo de la expresion
+			
+			//Si expresion es tipo vector recuperamos su tipo para realizar el control de tipos	
+			TypeIF tipoExpresionAccesoVector = scopeManager.searchType(tipoExpresion);
+			
+			if (tipoExpresionAccesoVector instanceof TypeArray) {
+				String tipoExpresionAV = ((TypeArray)tipoExpresionAccesoVector).getTipo().getName();
+								
+				if (!(tipoReferencia.equals(tipoExpresionAV))) {
+					semanticErrorManager.semanticFatalError("Error linea: " + ref.getLinea() + " , los tipos no coinciden");
+				}			
+			} else {
+				if (!(tipoReferencia.equals(tipoExpresion))) {
+					semanticErrorManager.semanticFatalError("Error linea: " + ref.getLinea() + " , los tipos no coinciden");
+				}		
+			}
+		}
+				
+							// **** Codigo intermedio **** // 
+							SentenciaAsignacion sentenciaAsignacion = new SentenciaAsignacion(); //objeto		
+							ScopeIF ambito = scopeManager.getCurrentScope(); //Ambito
+							TemporalFactory factoryTMP = new TemporalFactory(ambito); //Factory TMP
+							IntermediateCodeBuilder codeBuilder = new IntermediateCodeBuilder(ambito); //Code Builder
+						
+							TemporalIF tempReferencia = ref.getTemporal(); //Recuperar ref
+							TemporalIF tempExpresion = exp.getTemporal(); //Recueperar exp
+											
+							codeBuilder.addQuadruples(exp.getIntermediateCode()); //Añadir cuadruplas expresion
+							codeBuilder.addQuadruples(ref.getIntermediateCode()); //Añadir cuadruplas referencia
+							
+							codeBuilder.addQuadruple("STP", tempReferencia, tempExpresion); //recupera el valor de tempExpresion,  y lo guarda en la dirección de memoria apuntada por  tempReferencia
+														
+							sentenciaAsignacion.setIntermediateCode(codeBuilder.create());
+	
+		RESULT = sentenciaAsignacion;
+
+		:};
+		
+
+ref ::= IDENTIFICADOR:ide     
+
+		{:
+				
+		//ACCIONES
+		//Verificar IDENTIFICADOR, es una variable o un parametro de una funcion (solo si la sentencia de asignacion pertenece a la propia funcion)
+		//Verificar no es una constante
+		//Verificar no es un vector Es un ERROR, si pasa por aquí esta mal formado (no tiene los [])	
+			
+		String nombre = ide.getLexema(); //Nombre del identificador
+		int linea = ide.getLine(); //Linea del token
+		ScopeIF ambito = scopeManager.getCurrentScope(); //Ambito
+		
+		//Comprobar existencia del identificador en todos los ambito alcanzables
+		if(!scopeManager.containsSymbol(nombre)) {
+			semanticErrorManager.semanticFatalError("Error linea: " + ide.getLine() + " , el identificador " + nombre + " no existe en este ambito.");
+		}
+		
+		SymbolIF identificador = scopeManager.searchSymbol(nombre); //Recuperar objeto simbolo del  identificador de la tabla de simbolos
+		TypeIF tipo = identificador.getType(); //Tipo del identificador
+				
+		// comprobar si el tipo es de constante --> Es un ERROR, no se puede asignar a una constante	
+		if (identificador instanceof SymbolConstant) {
+			semanticErrorManager.semanticFatalError("Error linea: " + ide.getLine() + " , el identificador " + nombre + " corresponde a una constante simbolica.");
+		}
+		
+		
+		// comprobar si el tipo es tipo vector 
+		if (tipo instanceof TypeArray) {
+			semanticErrorManager.semanticFatalError("Error linea: " + ide.getLine() + " , el identificador " + nombre + " es de tipo vector.");
+		}
+			
+		
+						// **** Codigo intermedio **** //
+						Ref referencia = new Ref(nombre, tipo, linea); //Objeto
+						TemporalFactory factoryTMP = new TemporalFactory(ambito); //Factory TMP
+						IntermediateCodeBuilder codeBuilder = new IntermediateCodeBuilder(ambito); //Code Builder
+						
+						TemporalIF temporal = factoryTMP.create(); 
+						
+						Variable variable = new Variable(nombre, identificador.getScope());
+						
+						codeBuilder.addQuadruple("MVA", temporal, variable); // Temporal = valor direccion de memoria de variable
+							
+						referencia.setTemporal(temporal);
+						referencia.setIntermediateCode(codeBuilder.create());
+	
+		RESULT = referencia;
+
+		:}
+
+| accesoVector:ref     
+
+		{:
+		
+		RESULT = (Ref)ref;
+
+		:};
+
+
+sentenciaAsignacionSuma ::= ref:ref ASSIGN_SUMA expresion:exp SEMI_COLON     
+		
+		{:
+		
+		//ACCIONES
+		//ref se ha verificado en la regla anterior
+		//Realizar el control de tipos entre ref y expresion, tanto ref como expresion puede ser un identificador o un vector	
+		//Recuperar el tipo de la referencia puede ser un identificador o un vector (Se trata de forma diferente ya que la forma de recuperar el tipo es diferente)
+		//Recuperar el tipo de la expresion puede ser un identificador o un vector (Se trata de forma diferente ya que la forma de recuperar el tipo es diferente)
+		
+		//Identificador
+		if ((ref.getTipo() instanceof TypeSimple)) { 
+			String tipoReferencia = ref.getTipo().getName(); //Recuperar el tipo del identificador
+			String tipoExpresion = exp.getTipo().getName(); //Recuperar tipo de la expresion
+			
+			//Recuperar el tipo de la expresion en caso de que sea un vector
+			TypeIF tipoExpresionAccesoVector = scopeManager.searchType(tipoExpresion);
+			if (tipoExpresionAccesoVector instanceof TypeArray) {
+				String tipoExpresionAV = ((TypeArray)tipoExpresionAccesoVector).getTipo().getName();
+								
+				if (!(tipoReferencia.equals(tipoExpresionAV))) { //Tipo vector
+					semanticErrorManager.semanticFatalError("Error linea: " + ref.getLinea() + " , los tipos no coinciden");
+				}
+							
+			} else {
+				if (!(tipoReferencia.equals(tipoExpresion))) { 
+					semanticErrorManager.semanticFatalError("Error linea: " + ref.getLinea() + " , los tipos no coinciden");
+				}			
+			}
+		}
+		
+		//Vector
+		if ((ref.getTipo() instanceof TypeArray)) { 
+			SymbolIF identificador = scopeManager.searchSymbol(ref.getNombre()); //Recuperar simbolo 
+			TypeIF tipo = identificador.getType(); //Recuperar el tipo del simbolo
+			String tipoReferencia = ((TypeArray)tipo).getTipo().getName(); //Recuperar tipo del simbolo
+			String tipoExpresion = exp.getTipo().getName(); //Recuperar tipo de la expresion
+			
+			//Recuperar el tipo de la expresion en caso de que sea un vector	
+			TypeIF tipoExpresionAccesoVector = scopeManager.searchType(tipoExpresion);
+			if (tipoExpresionAccesoVector instanceof TypeArray) {
+				String tipoExpresionAV = ((TypeArray)tipoExpresionAccesoVector).getTipo().getName();
+								
+				if (!(tipoReferencia.equals(tipoExpresionAV))) {//Tipo vector
+					semanticErrorManager.semanticFatalError("Error linea: " + ref.getLinea() + " , los tipos no coinciden");
+				}
+							
+			} else {
+				if (!(tipoReferencia.equals(tipoExpresion))) {
+					semanticErrorManager.semanticFatalError("Error linea: " + ref.getLinea() + " , los tipos no coinciden");
+				}		
+			}
+		}
+					
+							// **** Codigo intermedio **** //								
+							SentenciaAsignacion sentenciaAsignacion = new SentenciaAsignacion(); //Objeto 
+							ScopeIF ambito = scopeManager.getCurrentScope(); //Ambito
+							TemporalFactory factoryTMP = new TemporalFactory(ambito); //Factory TMP
+							IntermediateCodeBuilder codeBuilder = new IntermediateCodeBuilder(ambito); //Code Builder
+							
+							TemporalIF temporalReferenciaValor = factoryTMP.create();
+							TemporalIF temporalResultado = factoryTMP.create();
+							TemporalIF tempReferencia = ref.getTemporal();
+							TemporalIF tempExpresion = exp.getTemporal();
+							
+							codeBuilder.addQuadruples(ref.getIntermediateCode()); //Añadir quadruplas referencia
+							codeBuilder.addQuadruples(exp.getIntermediateCode()); //Añadir quadruplas expresion
+							
+							codeBuilder.addQuadruple("MVP", temporalReferenciaValor, tempReferencia); //TemporalReferenciaValor = valor apuntado por tempReferencia
+							codeBuilder.addQuadruple("ADD", temporalResultado, temporalReferenciaValor, tempExpresion); //Realizar la suma
+							codeBuilder.addQuadruple("STP", tempReferencia, temporalResultado); //recupera el valor de temporalResultado,  y lo guarda en la dirección de memoria apuntada por  tempReferencia
+							
+							sentenciaAsignacion.setIntermediateCode(codeBuilder.create());
+						
+			RESULT = sentenciaAsignacion;
+									
+		:};
+
+
+sentenciaSi ::= SI OPEN_KEY expresion:exp CLOSE_KEY sentencia:lisSen sentenciaSiFactorizada:sen2 
+		 
+		{:
+		
+		//ACCIONES
+		//Comprobar que expresion es de tipo logico		
+				
+		boolean expresionLogica = exp.getTipoExpresion(); //TipoExpresion TRUE = expresion logica
+		
+		if (!expresionLogica) {
+			semanticErrorManager.semanticFatalError("Error linea: " + exp.getLinea() + " la expresion no es una expresion logica" );
+		}
+					
+							// **** Codigo intermedio **** //							
+							SentenciaSi sentenciaSi = new SentenciaSi(); //Objeto							
+							ScopeIF ambito = scopeManager.getCurrentScope(); //Ambito							
+							TemporalFactory factoryTMP = new TemporalFactory(ambito); //Factory TMP
+							IntermediateCodeBuilder codeBuilder = new IntermediateCodeBuilder(ambito); //Code Builder
+							LabelFactory factoryLABEL = new LabelFactory(); //Factory label
+							
+							LabelIF etiquetaFinIf = factoryLABEL.create(); //Etiqueta para fin de las sentencias IF
+							LabelIF etiquetaElse = factoryLABEL.create(); //Etiqueta de comienzo parte Else							
+							
+							TemporalIF expTemp = exp.getTemporal();
+							
+							codeBuilder.addQuadruples(exp.getIntermediateCode()); //Añadir quadruplas expresion							
+							codeBuilder.addQuadruple("BRF", expTemp, etiquetaElse); //si no se cumple la condicion salto etiquetaElse
+							
+							//Si el objeto lisSen es una lista de sentencias  se recorre la lista y se recupera el codigo intermedio de cada sentencia
+							if (lisSen instanceof ListadoSentencias) {
+								ArrayList<Sentencia> listadoSen = new ArrayList<Sentencia>();			
+								listadoSen = ((ListadoSentencias) lisSen).getListaSentencias();
+								
+								while (listadoSen.remove(null)) {} //Eliminar elementos null en la lista			
+								Collections.reverse(listadoSen); //Ordenar lista
+											
+								for (int x = 0; x < listadoSen.size() ; x++) {
+									codeBuilder.addQuadruples (listadoSen.get(x).getIntermediateCode()); // añadir código listado sentencias parte IF
+								}
+							}
+							else {
+								codeBuilder.addQuadruples (lisSen.getIntermediateCode());  // añadir código sentencias parte IF
+							}
+							
+							codeBuilder.addQuadruple("BR", etiquetaFinIf); //salto a la etiquetaFinIf
+							codeBuilder.addQuadruple("INL", etiquetaElse); // insertar etiquetaElse
+							
+							//Si el objeto lisSen es una lista de sentencias  se recorre la lista y se recupera el codigo intermedio de cada sentencia
+							if (lisSen instanceof ListadoSentencias) {
+								ArrayList<Sentencia> listadoSen = new ArrayList<Sentencia>();			
+								listadoSen = ((ListadoSentencias) sen2).getListaSentencias();
+								
+								while (listadoSen.remove(null)) {} //Eliminar elementos null en la lista			
+								Collections.reverse(listadoSen); //Ordenar lista
+											
+								for (int x = 0; x < listadoSen.size() ; x++) {
+									codeBuilder.addQuadruples (listadoSen.get(x).getIntermediateCode()); //añadir código listado sentencias parte Else
+								}
+							} else {
+								codeBuilder.addQuadruples (((Sentencia)sen2).getIntermediateCode()); //añadir código sentencias parte Else
+							}
+								
+							codeBuilder.addQuadruple("INL", etiquetaFinIf); // insertar etiquetaFinIf
+							sentenciaSi.setIntermediateCode(codeBuilder.create());
+							
+		RESULT = sentenciaSi;
+						
+		:};
+		
+
+sentenciaSiFactorizada ::= SINO sentencia:sen
+
+		{:
+			
+		RESULT = sen;
+		
+		:}
+		
+| epsilon {:  ListadoSentencias eps = new ListadoSentencias();  RESULT = eps; :};
+
+	
+sentenciaAlternativas ::= ALTENATIVAS OPEN_KEY expresion:exp CLOSE_KEY OPEN_PARENTHESIS casosAlternativa:casosAlt porDefecto:porDef
+		
+		{:
+		
+		//ACCIONES
+		//Comprobar que expresion es de tipo numerica	
+		
+		boolean expresionLogica = exp.getTipoExpresion(); //TipoExpresion TRUE = expresion logica
+		
+		if (expresionLogica) {
+			semanticErrorManager.semanticFatalError("Error linea: " + exp.getLinea() + " la expresion no es una expresion numerica" );
+		}
+		
+		//Recuperar las sentencias de los casos alternativa																			¡
+		CasosAlternativa lista = new CasosAlternativa(); //Lista de CasoAlt
+		lista.setLista(((CasosAlternativa)casosAlt).getListadoCasos()); //Copiar lista anterior				
+		ArrayList<CasoAlt>  listadoCasosAlternativa =  new ArrayList<CasoAlt>(); //ArrayList de CasoAlt	
+		listadoCasosAlternativa =  lista.getListadoCasos();//Copiar lista anterior
+		
+		while (listadoCasosAlternativa.remove(null)) {} //Eliminar elementos null en la lista de casos			
+		Collections.reverse(listadoCasosAlternativa); //Ordenar lista de casos
+				
+		//Por cada elemento de la lista de casos comprobamos el numero de caso
+		CasoAlt objetoCasoAlt = new CasoAlt();
+		ArrayList<Integer> controlIdentificadorCasos = new ArrayList<Integer>(); //Array para registrar el numero de casos y evitar repeticiones de casos
+		
+		for (int x = 0; x < listadoCasosAlternativa.size() ; x++) { //Iteramos y añadir el caso en la lista numeros de casos 
+			objetoCasoAlt = listadoCasosAlternativa.get(x);									
+			Integer caso = objetoCasoAlt.getCaso(); //Recuperamos el numero de caso
+
+			if (controlIdentificadorCasos.contains(caso)) {
+				semanticErrorManager.semanticFatalError("Error: el numero de caso : " + caso + " ya esta usado en la sentencia alternativas" );
+			}
+			else {
+				controlIdentificadorCasos.add(caso);
+			}
+		}
+							
+							// **** Codigo intermedio **** //							
+							ArrayList<Sentencia>  listadoSentencias =  new ArrayList<Sentencia>(); //ArrayList de Sentencias							
+							SentenciaAlternativas sentenciaAlternativas = new SentenciaAlternativas(); //Objeto
+							ScopeIF ambito = scopeManager.getCurrentScope(); //Ambito							
+							TemporalFactory factoryTMP = new TemporalFactory(ambito); //Factory TMP
+							IntermediateCodeBuilder codeBuilder = new IntermediateCodeBuilder(ambito); //Code Builder
+							LabelFactory factoryLABEL = new LabelFactory(); //Factory label
+							
+							LabelIF etiquetaTest = factoryLABEL.create(); //Etiqueta test
+							LabelIF etiquetaFin = factoryLABEL.create(); //Etiqueta fin
+							LabelIF etiquetaPorDefecto = factoryLABEL.create(); //Etiqueta porDefecto
+							
+							TemporalIF expTemp = exp.getTemporal();	//Recuperar expresion. Debe ser variable entera. No tiene sentido constante literal/simbolica
+							
+							codeBuilder.addQuadruples(exp.getIntermediateCode()); //Añadir cuadruplas expresion
+				
+							codeBuilder.addQuadruple("BR", etiquetaTest); //salto a la etiquetaTest
+							
+							//Iteramos la lista de casos para generar una tupla (Etiqueta - caso - Value) por cada numero de caso  
+							List<EtiquetasCasos> listaEtiquetasCasos = new ArrayList<EtiquetasCasos>();//Lista de tuplas
+					
+							for (int x = 0; x < listadoCasosAlternativa.size() ; x++) {
+								objetoCasoAlt = listadoCasosAlternativa.get(x);									
+								Integer casoNumero = objetoCasoAlt.getCaso(); //Recuperamos el numero de caso
+								LabelIF etiqueta = factoryLABEL.create(); //Creamos la etiqueta
+								Value valorCaso = new Value(casoNumero); //Objeto value
+								EtiquetasCasos  tupla = new EtiquetasCasos(etiqueta, casoNumero, valorCaso); //tupla
+								listaEtiquetasCasos.add(tupla); //añadir tupla
+							}
+							
+							//Para cada caso insertamos su etiqueta de salto y la lista de sentencias		
+							for (int x = 0; x < listadoCasosAlternativa.size() ; x++) { //Iterar la lista de casos
+								objetoCasoAlt = listadoCasosAlternativa.get(x);									
+								Integer caso = objetoCasoAlt.getCaso(); //Recuperar el numero de caso
+								listadoSentencias = objetoCasoAlt.getListado().getListaSentencias(); //Recuperar la lista de sentencias de cada caso
+								
+								for (int z = 0; z < listaEtiquetasCasos.size() ; z++) { //Buscar en la lista de tuplas la etiqueta correspondiente al caso
+									if (caso == listaEtiquetasCasos.get(z).getCaso()) {
+										codeBuilder.addQuadruple("INL", listaEtiquetasCasos.get(z).getEtiqueta()); //Insertar etiqueta caso
+									}
+								}
+															
+								for (int y = 0; y < listadoSentencias.size() ; y++) { //Iteramos la lista de sentencias
+									codeBuilder.addQuadruples(listadoSentencias.get(y).getIntermediateCode()); //Añadimos las quadruplas de todas las sentencias
+								}
+								
+								//despues de añadir las sentencias de cada caso saltamos a la etiqueta FIN
+								codeBuilder.addQuadruple("BR", etiquetaFin); //salto a la etiquetaFIN
+							}
+							
+							
+							//Recuperamos las sentencias del bloque por defecto		
+							if (((PorDefecto)porDef).getListado() == null) { //control lista sentencias por defecto vacia
+								semanticErrorManager.semanticInfo("INFO: No existe sentencia 'por defecto'" );
+							} else {	
+								ListadoSentencias listadoPorDefecto = ((PorDefecto)porDef).getListado();
+								
+								codeBuilder.addQuadruple("INL", etiquetaPorDefecto); 
+															
+								ArrayList<Sentencia> listadoSen = new ArrayList<Sentencia>();	
+								listadoSen = ((ListadoSentencias)listadoPorDefecto).getListaSentencias();
+								
+								while (listadoSen.remove(null)) {} //Eliminar elementos null en la lista de sentencias				
+								Collections.reverse(listadoSen); //Ordenar lista de sentencias
+															
+								for (int x = 0; x < listadoSen.size() ; x++) {
+									codeBuilder.addQuadruples(listadoSen.get(x).getIntermediateCode()); //Añadimos las quadruplas de todas las sentencias		
+								}								
+							}
+							
+							
+							codeBuilder.addQuadruple("BR", etiquetaFin); //salto a la etiquetaFIN
+							codeBuilder.addQuadruple("INL", etiquetaTest); // insertar etiqueta Test
+						
+							//Anadir quadruplas control de salto
+							for (int z = 0; z < listaEtiquetasCasos.size() ; z++) {
+								LabelIF etiquetaSalto = listaEtiquetasCasos.get(z).getEtiqueta();
+								Value valorCaso = listaEtiquetasCasos.get(z).getValor();	
+								TemporalIF temp = factoryTMP.create();
+											
+								codeBuilder.addQuadruple("EQ", temp, expTemp, valorCaso ); //Comparar valor caso con expresion	
+								codeBuilder.addQuadruple("BRT", temp, etiquetaSalto ); //Saltar al caso 
+							}
+						
+							//Etiqueta por defecto. Control lista sentencias no vacia
+							if (((PorDefecto)porDef).getListado() == null) { 
+								semanticErrorManager.semanticInfo("INFO: No existe sentencia 'por defecto'" );
+							} else {
+								codeBuilder.addQuadruple("BR", etiquetaPorDefecto); //Saltar a la etiqueta por defecto
+							}
+							
+							codeBuilder.addQuadruple("INL", etiquetaFin); // insertar etiqueta fin
+							
+							sentenciaAlternativas.setIntermediateCode(codeBuilder.create());
+							
+		RESULT = sentenciaAlternativas;
+							
+		:}CLOSE_PARENTHESIS;
+		
+
+casosAlternativa ::= casoAlt:cas casosAlternativa:casAlt
+
+		{:
+										
+		CasosAlternativa lista = new CasosAlternativa(); //Lista de variables
+		lista.setLista(((CasosAlternativa)casAlt).getListadoCasos()); //Copiar lista anterior
+		CasoAlt caso = new CasoAlt(cas.getCaso(),cas.getListado());
+		lista.addCaso(caso); //Añadir caso
+		
+		RESULT = lista; //Retornar lista de casos	
+		
+		:}
+
+| casoAlt:cas
+
+		{:
+								
+		CasosAlternativa lista = new CasosAlternativa(); //Lista de variables
+		CasoAlt caso = new CasoAlt(cas.getCaso(),cas.getListado());
+		lista.addCaso(caso); //Añadir caso
+		
+		RESULT = lista; //Retornar lista de casos
+
+		:};
+		
+
+casoAlt ::= CASO NUMERO:num TWO_POINTS bloque:blo CORTE
+
+		{:
+		
+		CasoAlt  casoAlt = new CasoAlt(Integer.valueOf(num.getLexema()),(ListadoSentencias)blo); //Sentencias Caso
+		
+		RESULT = casoAlt;
+		
+		:} SEMI_COLON;
+		
+
+porDefecto ::= PORDEFECTO TWO_POINTS bloque:blo
+
+		{:
+	
+			PorDefecto  porDefecto = new PorDefecto((ListadoSentencias)blo); //Sentencias porDefecto 			
+				
+			RESULT = porDefecto;
+		
+		:} CORTE SEMI_COLON
+
+| epsilon
+
+		{: 
+
+			PorDefecto eps = new PorDefecto(); //se controla en el padre si lista vacia
+
+			RESULT = eps; :} ; 
+
+
+
+sentenciaMientras ::= MIENTRAS OPEN_KEY expresion:exp CLOSE_KEY sentencia:sen 
+		 
+		{:
+
+		//ACCIONES
+		//Comprobar que expresion es de tipo logico
+		
+		boolean expresionLogica = exp.getTipoExpresion(); //Tipo de expresion TRUE = expresion logica
+		
+		if (!expresionLogica) {
+			semanticErrorManager.semanticFatalError("Error linea: " + exp.getLinea() + " la expresion no es una expresion logica" );
+		}
+			
+							// **** Codigo intermedio **** //
+							SentenciaMientras sentenciaMientras = new SentenciaMientras(); //Objeto
+							ScopeIF ambito = scopeManager.getCurrentScope(); //Ambito							
+							TemporalFactory factoryTMP = new TemporalFactory(ambito); //Factory TMP
+							IntermediateCodeBuilder codeBuilder = new IntermediateCodeBuilder(ambito); //Code Builder
+							LabelFactory factoryLABEL = new LabelFactory(); //Factory label
+							
+							LabelIF etiquetaInicio = factoryLABEL.create(); //Etiqueta inicio
+							LabelIF etiquetaFin = factoryLABEL.create(); //Etiqueta fin
+							
+							codeBuilder.addQuadruple("INL", etiquetaInicio); // insertar etiqueta inicio
+							TemporalIF expTemp = exp.getTemporal();//Recuperar expresion
+							codeBuilder.addQuadruples(exp.getIntermediateCode()); //Añadir cuadruplas expresion
+							
+							codeBuilder.addQuadruple("BRF", expTemp, etiquetaFin); //si no se cumple la condicion salto etiqueta fin
+																				
+							//Si el objeto sen es una lista de sentencias  se recorre la lista y se recupera el codigo intermedio de cada sentencia
+							if (sen instanceof ListadoSentencias) {
+								ArrayList<Sentencia> listadoSen = new ArrayList<Sentencia>();			
+								listadoSen = ((ListadoSentencias) sen).getListaSentencias();
+								
+								while (listadoSen.remove(null)) {} //Eliminar elementos null en la lista			
+								Collections.reverse(listadoSen); //Ordenar lista
+										
+								for (int x = 0; x < listadoSen.size() ; x++) {
+									codeBuilder.addQuadruples (listadoSen.get(x).getIntermediateCode()); //Añadir código lista de sentencias
+								}
+							} else {
+								codeBuilder.addQuadruples (sen.getIntermediateCode());  //añadir código sentencia
+							}
+							
+							codeBuilder.addQuadruple("BR", etiquetaInicio); //salto a la etiqueta Inicio
+							codeBuilder.addQuadruple("INL", etiquetaFin);
+							
+							sentenciaMientras.setIntermediateCode(codeBuilder.create());
+							
+		RESULT = sentenciaMientras;
+		
+		:};
+		
+
+sentenciaLlamadaFuncion ::= llamadaFuncion:llaFun //No se implementa Cod. intermedio
+
+		{:
+			
+		//Comprobar que la funcion no se llama desde el contexto de una sentencia
+		SymbolIF simbolo = llaFun.getFuncion();
+		String nombre = simbolo.getName();
+			
+		if (simbolo instanceof SymbolFunction) {
+			semanticErrorManager.semanticFatalError("Error: la funcion " + nombre + " se ha llamado en un contexto incorrecto" );
+		}	
+							
+		:} SEMI_COLON;
+
+
+sentenciaSalida ::= ESCRIBE OPEN_KEY opcionesEscribe:opc     
+
+		{:
+		
+		String texto = (String)opc; //Cadena texto
+		
+		if (texto == null) { //control sentencia escribe vacia
+			texto = " \"\\n\" ";
+		}
+													
+						// **** Codigo intermedio **** //
+						SentenciaSalida sentencia = new SentenciaSalida(); //Objeto
+						ScopeIF ambito = scopeManager.getCurrentScope(); //Ambito
+						TemporalFactory factoryTMP = new TemporalFactory(ambito); //Factory TMP
+						IntermediateCodeBuilder codeBuilder = new IntermediateCodeBuilder(ambito); //Code Builder
+						LabelFactory factoryLABEL = new LabelFactory(); //Factory label					
+						
+						LabelIF etiquetaCad = factoryLABEL.create(); //Etiqueta
+						
+						TemporalIF temp = factoryTMP.create();
+						
+				 		codeBuilder.addQuadruple("WRITESTRING", temp, etiquetaCad);
+						
+						//Guardamos la cadena de caracteres en "listaCadena" y la recuperaremos al final del programa principal
+						listaCadenas.add(new Quadruple("CADENA", new Label(texto), etiquetaCad));
+						
+						sentencia.setIntermediateCode(codeBuilder.create());
+			
+		RESULT = sentencia;
+			
+		:} CLOSE_KEY SEMI_COLON
+
+| ESCRIBE_ENT OPEN_KEY opcionesEscribeEnt:opcEnt
+
+		{:
+		
+		if (opcEnt == null) { //control sentencia escribeEnt vacia
+			semanticErrorManager.semanticInfo("INFO: No existe 'valor entero' " );
+		} else {						
+							// **** Codigo intermedio **** //
+							SentenciaSalida sentencia = new SentenciaSalida(); //Objeto
+							ScopeIF ambito = scopeManager.getCurrentScope(); //Ambito						
+							TemporalFactory factoryTMP = new TemporalFactory(ambito); //Factory TMP 
+							IntermediateCodeBuilder codeBuilder = new IntermediateCodeBuilder(ambito); //Code Builder
+	
+							TemporalIF tempExpresion = ((Expresion)opcEnt).getTemporal(); //Recuperar expresion
+
+							codeBuilder.addQuadruples(((Expresion)opcEnt).getIntermediateCode()); //Añadir cuadrupla expresion						
+						
+							codeBuilder.addQuadruple("WRITEINT", tempExpresion);
+							sentencia.setIntermediateCode(codeBuilder.create());
+			
+		RESULT = sentencia;
+		
+		}
+		
+		:} CLOSE_KEY SEMI_COLON;
+
+	
+opcionesEscribe ::= STRING:str     
+
+		{:
+		
+		String cadena = str.getLexema(); //Cadena
+		
+		RESULT = cadena;
+		
+		:}
+
+|  epsilon; //Se controla en padre si es vacio
+
+
+opcionesEscribeEnt ::= expresion:exp     
+
+		{:
+		
+		//ACCIONES
+		//Verificamos si la expresion es una expresion logica y en este caso se informa del error
+		//Se toma la decision de diseño de no permitir expresiones logicas en la sentencia ESCRIBE_ENT
+		
+		boolean expresionLogica = exp.getTipoExpresion(); //Tipo de expresion TRUE = expresion logica
+		
+		if (expresionLogica) {
+			semanticErrorManager.semanticFatalError("Error linea: " + exp.getLinea() + " no se permiten expresiones logicas en la sentencia ESCRIBE_ENT. " );
+		}
+		
+		RESULT = exp;
+		
+		:}
+
+|  epsilon; //Se controla en padre si es vacio
