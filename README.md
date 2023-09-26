@@ -44,4 +44,10 @@ Para ello se han realizado las siguientes acciones:
 • Gestion de errores léxicos, sintácticos, semánticos ( LexicalErrorManager, SyntaxErrorManager, SemanticErrorManager).
 
 
+Generación de código intermedio
+
+El código intermedio es una secuencia de instrucciones cercanas al código destino, pero independientes de cualquier arquitectura física.
+Para la generación del código intermedio se ha usado la representación lineal, realizada por Javier Vélez Reyes, donde cada elemento se compone de: código de operación, hasta dos operandos de entrada y uno de salida.
+
+
 
