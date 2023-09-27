@@ -1,5 +1,9 @@
 # Procesadores-Lenguaje-II
 
+** Contenido: ** Escáner, parser y clase traducción código intermedio a código final
+** Contacto: ** culex.jj@gmail.com
+** Estado: ** funcional (solo parte obligatoria de la practica)
+
 ## El analizador semántico y la comprobación de tipos.
 
 
